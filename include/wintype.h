@@ -15,14 +15,20 @@ typedef union any {
     struct obj *a_obj;
     struct monst *a_monst;
     int a_int;
+    int a_xint16;
+    int a_xint8;
     char a_char;
     schar a_schar;
     uchar a_uchar;
     unsigned int a_uint;
     long a_long;
     unsigned long a_ulong;
+    coordxy a_coordxy;
     int *a_iptr;
+    xint16 *a_xint16ptr;
+    xint8 *a_xint8ptr;
     long *a_lptr;
+    coordxy *a_coordxyptr;
     unsigned long *a_ulptr;
     unsigned *a_uptr;
     const char *a_string;
@@ -111,6 +117,8 @@ typedef struct gi {
 #define NHW_MAP 3
 #define NHW_MENU 4
 #define NHW_TEXT 5
+#define NHW_PERMINVENT 6
+#define NHW_LAST_TYPE NHW_PERMINVENT
 
 /* attribute types for putstr; the same as the ANSI value, for convenience */
 #define ATR_NONE       0
@@ -161,6 +169,46 @@ typedef struct gi {
  */
 
 #define MENU_BEHAVE_STANDARD      0x0000000U
+#define MENU_BEHAVE_PERMINV       0x0000001U
+
+enum perm_invent_toggles {toggling_off = -1, toggling_not = 0, toggling_on = 1 };
+
+/* inventory modes */
+enum inv_modes { InvNormal = 0, InvShowGold = 1, InvSparse = 2, InvInUse = 4 };
+
+enum to_core_flags {
+    active           = 0x001,
+    prohibited       = 0x002,
+    no_init_done     = 0x004
+};
+
+enum from_core_requests {
+    set_mode         = 1,
+    request_settings = 2,
+};
+
+struct to_core {
+    long tocore_flags;
+    boolean active;
+    boolean use_update_inventory;    /* disable the newer slot interface */
+    int maxslot;
+    int needrows, needcols;
+    int haverows, havecols;
+};
+
+struct from_core {
+    enum from_core_requests core_request;
+    enum inv_modes invmode;
+};
+
+struct win_request_info_t {
+    struct to_core tocore;
+    struct from_core fromcore;
+};
+
+typedef struct win_request_info_t win_request_info;
+
+/* #define CORE_INVENT */
 
 /* clang-format on */
 

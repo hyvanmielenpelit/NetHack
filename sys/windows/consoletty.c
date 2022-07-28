@@ -884,7 +884,8 @@ void buffer_fill_to_end(cell_t * buffer, cell_t * fill, int x, int y)
     while (dst != sentinel)
         *dst++ = *fill;
 
-    if (iflags.debug.immediateflips && buffer == console.back_buffer)
+    if ((iflags.debug.immediateflips || !g.program_state.in_moveloop)
+        && buffer == console.back_buffer)
         back_buffer_flip();
 }
 
@@ -899,7 +900,7 @@ static void buffer_clear_to_end_of_line(cell_t * buffer, int x, int y)
     while (dst != sentinel)
         *dst++ = clear_cell;
 
-    if (iflags.debug.immediateflips)
+    if (iflags.debug.immediateflips || !g.program_state.in_moveloop)
         back_buffer_flip();
 }
 
@@ -911,7 +912,8 @@ void buffer_write(cell_t * buffer, cell_t * cell, COORD pos)
     cell_t * dst = buffer + (console.width * pos.Y) + pos.X;
     *dst = *cell;
 
-    if (iflags.debug.immediateflips && buffer == console.back_buffer)
+    if ((iflags.debug.immediateflips || !g.program_state.in_moveloop)
+        && buffer == console.back_buffer)
         back_buffer_flip();
 }
 
@@ -1112,7 +1114,7 @@ tgetch()
 }
 
 int
-console_poskey(int *x, int *y, int *mod)
+console_poskey(coordxy *x, coordxy *y, int *mod)
 {
     int ch;
     coord cc = { 0, 0 };
@@ -1182,6 +1184,11 @@ really_move_cursor()
 void
 cmov(int x, int y)
 {
+    if (x >= console.width)
+        x = console.width - 1;
+    if (y >= console.height)
+        y = console.height - 1;
+
     ttyDisplay->cury = y;
     ttyDisplay->curx = x;
 
@@ -1221,8 +1228,11 @@ xputs(const char* s)
 int
 xputc(int ch)
 {
-    set_console_cursor(ttyDisplay->curx, ttyDisplay->cury);
-    xputc_core(ch);
+    int x = ttyDisplay->curx, y = ttyDisplay->cury;
+    if (x < console.width && y < console.height) {
+        set_console_cursor(ttyDisplay->curx, ttyDisplay->cury);
+        xputc_core(ch);
+    }
     return 0;
 }
 
@@ -1432,16 +1442,20 @@ term_end_24bitcolor(void)
 void
 cl_end(void)
 {
-    set_console_cursor(ttyDisplay->curx, ttyDisplay->cury);
-    buffer_clear_to_end_of_line(console.back_buffer, console.cursor.X,
-                                console.cursor.Y);
-    tty_curs(BASE_WINDOW, (int) ttyDisplay->curx + 1, (int) ttyDisplay->cury);
+    if (ttyDisplay->curx < console.width 
+            && ttyDisplay->cury < console.height) {
+        set_console_cursor(ttyDisplay->curx, ttyDisplay->cury);
+        buffer_clear_to_end_of_line(console.back_buffer, console.cursor.X,
+                                    console.cursor.Y);
+        tty_curs(BASE_WINDOW, (int) ttyDisplay->curx + 1,
+                 (int) ttyDisplay->cury);
+    }
 }
 
 void
 raw_clear_screen(void)
 {
-    if (WINDOWPORT("tty")) {
+    if (WINDOWPORT(tty)) {
         cell_t * back = console.back_buffer;
         cell_t * front = console.front_buffer;
         COORD pos;
@@ -2364,13 +2378,18 @@ void nethack_enter_consoletty(void)
                      console.orig_csbi.srWindow.Left + 1;
     console.Width = max(console.Width, COLNO);
 #else
-    console.width = COLNO;
+//    console.width = COLNO;
+    console.width = console.orig_csbi.srWindow.Right -
+                     console.orig_csbi.srWindow.Left + 1;
+    if (console.width < COLNO)
+        console.width = COLNO;
 #endif
 
     console.height = console.orig_csbi.srWindow.Bottom -
                      console.orig_csbi.srWindow.Top + 1;
-    console.height = max(console.height, ROWNO + 3);
-
+//    console.height = max(console.height, ROWNO + 3);
+    if (console.height < (ROWNO + 2 + 1))
+        console.height = (ROWNO + 2 + 1);
     console.buffer_size = console.width * console.height;
 
 
@@ -2780,7 +2799,7 @@ set_keyhandling_via_option(void)
 {
     winid tmpwin;
     anything any;
-    int i;
+    int i, clr = 0;
     menu_item *console_key_handling_pick = (menu_item *) 0;
 
     tmpwin = create_nhwindow(NHW_MENU);
@@ -2789,7 +2808,7 @@ set_keyhandling_via_option(void)
     for (i = default_keyhandling; i < SIZE(legal_key_handling); i++) {
         any.a_int = i + 1;
         add_menu(tmpwin, &nul_glyphinfo, &any, 'a' + i,
-                 0, ATR_NONE,
+                 0, ATR_NONE, clr,
                  legal_key_handling[i], MENU_ITEMFLAGS_NONE);
     }
     end_menu(tmpwin, "Select windows console key handling:");

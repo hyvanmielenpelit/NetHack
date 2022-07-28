@@ -71,7 +71,7 @@ static void dump_display_nhwindow(winid, boolean);
 static void dump_destroy_nhwindow(winid);
 static void dump_start_menu(winid, unsigned long);
 static void dump_add_menu(winid, const glyph_info *, const ANY_P *, char,
-                          char, int, const char *, unsigned int);
+                          char, int, int, const char *, unsigned int);
 static void dump_end_menu(winid, const char *);
 static int dump_select_menu(winid, int, MENU_ITEM_P **);
 static void dump_putstr(winid, int, const char *);
@@ -312,7 +312,7 @@ choose_windows(const char *s)
         free((genericptr_t) tmps) /*, tmps = 0*/ ;
 
     if (windowprocs.win_raw_print == def_raw_print
-            || WINDOWPORT("safe-startup"))
+            || WINDOWPORT(safestartup))
         nh_terminate(EXIT_SUCCESS);
 }
 
@@ -501,17 +501,17 @@ genl_putmsghistory(const char *msg, boolean is_restoring)
 
 static int hup_nhgetch(void);
 static char hup_yn_function(const char *, const char *, char);
-static int hup_nh_poskey(int *, int *, int *);
+static int hup_nh_poskey(coordxy *, coordxy *, int *);
 static void hup_getlin(const char *, char *);
 static void hup_init_nhwindows(int *, char **);
 static void hup_exit_nhwindows(const char *);
 static winid hup_create_nhwindow(int);
 static int hup_select_menu(winid, int, MENU_ITEM_P **);
 static void hup_add_menu(winid, const glyph_info *, const anything *, char,
-                         char, int, const char *, unsigned int);
+                         char, int, int, const char *, unsigned int);
 static void hup_end_menu(winid, const char *);
 static void hup_putstr(winid, int, const char *);
-static void hup_print_glyph(winid, xchar, xchar, const glyph_info *,
+static void hup_print_glyph(winid, coordxy, coordxy, const glyph_info *,
                             const glyph_info *);
 static void hup_outrip(winid, int, time_t);
 static void hup_curs(winid, int, int);
@@ -536,9 +536,10 @@ static void hup_void_fdecl_int(int);
 static void hup_void_fdecl_winid(winid);
 static void hup_void_fdecl_winid_ulong(winid, unsigned long);
 static void hup_void_fdecl_constchar_p(const char *);
+static win_request_info *hup_ctrl_nhwindow(winid, int, win_request_info *);
 
 static struct window_procs hup_procs = {
-    "hup", 0L, 0L,
+    WPID(hup), 0L, 0L,
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     hup_init_nhwindows,
     hup_void_ndecl,                                    /* player_selection */
@@ -551,7 +552,6 @@ static struct window_procs hup_procs = {
     hup_curs, hup_putstr, hup_putstr,                  /* putmixed */
     hup_display_file, hup_void_fdecl_winid_ulong,      /* start_menu */
     hup_add_menu, hup_end_menu, hup_select_menu, genl_message_menu,
-    hup_void_fdecl_int,                                /* update_inventory */
     hup_void_ndecl,                                    /* mark_synch */
     hup_void_ndecl,                                    /* wait_synch */
 #ifdef CLIPPING
@@ -584,6 +584,8 @@ static struct window_procs hup_procs = {
     hup_void_ndecl,                                   /* status_finish */
     genl_status_enablefield, hup_status_update,
     genl_can_suspend_no,
+    hup_void_fdecl_int,                                /* update_inventory */
+    hup_ctrl_nhwindow,
 };
 
 static void (*previnterface_exit_nhwindows)(const char *) = 0;
@@ -650,7 +652,7 @@ hup_yn_function(const char *prompt UNUSED,
 
 /*ARGSUSED*/
 static int
-hup_nh_poskey(int *x UNUSED, int *y UNUSED, int *mod UNUSED)
+hup_nh_poskey(coordxy *x UNUSED, coordxy *y UNUSED, int *mod UNUSED)
 {
     return '\033';
 }
@@ -692,6 +694,7 @@ hup_add_menu(winid window UNUSED,
              char sel UNUSED,
              char grpsel UNUSED,
              int attr UNUSED,
+             int clr UNUSED,
              const char *txt UNUSED,
              unsigned int itemflags UNUSED)
 {
@@ -715,7 +718,7 @@ hup_putstr(winid window UNUSED, int attr UNUSED, const char *text UNUSED)
 /*ARGSUSED*/
 static void
 hup_print_glyph(winid window UNUSED,
-                xchar x UNUSED, xchar y UNUSED,
+                coordxy x UNUSED, coordxy y UNUSED,
                 const glyph_info *glyphinfo UNUSED,
                 const glyph_info *bkglyphinfo UNUSED)
 {
@@ -835,6 +838,16 @@ static void
 hup_void_fdecl_constchar_p(const char *string UNUSED)
 {
     return;
+}
+
+/*ARGUSED*/
+win_request_info *
+hup_ctrl_nhwindow(
+    winid window UNUSED,  /* window to use, must be of type NHW_MENU */
+    int request UNUSED,
+    win_request_info *wri UNUSED)
+{
+    return (win_request_info *) 0;
 }
 
 #endif /* HANGUPHANDLING */
@@ -1284,6 +1297,7 @@ dump_add_menu(winid win UNUSED,
               char ch,
               char gch UNUSED,
               int attr UNUSED,
+              int clr UNUSED,
               const char *str,
               unsigned int itemflags UNUSED)
 {

@@ -1,4 +1,4 @@
-/* NetHack 3.7	cmd.c	$NHDT-Date: 1654899519 2022/06/10 22:18:39 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.571 $ */
+/* NetHack 3.7	cmd.c	$NHDT-Date: 1658993634 2022/07/28 07:33:54 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.597 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2013. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -130,6 +130,8 @@ static int wiz_rumor_check(void);
 static int wiz_migrate_mons(void);
 #endif
 
+static void makemap_unmakemon(struct monst *, boolean);
+static void makemap_remove_mons(void);
 static void wiz_map_levltyp(void);
 static void wiz_levltyp_legend(void);
 #if defined(__BORLANDC__) && !defined(_WIN32)
@@ -146,16 +148,17 @@ static void mon_chain(winid, const char *, struct monst *, boolean, long *,
                       long *);
 static void contained_stats(winid, const char *, long *, long *);
 static void misc_stats(winid, long *, long *);
+static void you_sanity_check(void);
 static boolean accept_menu_prefix(const struct ext_func_tab *);
 static void reset_cmd_vars(boolean);
 static void mcmd_addmenu(winid, int, const char *);
 static char here_cmd_menu(void);
-static char there_cmd_menu(int, int, int);
-static void act_on_act(int, int, int, int, int, int);
-static char readchar_core(int *, int *, int *);
+static char there_cmd_menu(coordxy, coordxy, int);
+static void act_on_act(int, coordxy, coordxy);
+static char readchar_core(coordxy *, coordxy *, int *);
 static char *parse(void);
 static void show_direction_keys(winid, char, boolean);
-static boolean help_dir(char, int, const char *);
+static boolean help_dir(char, uchar, const char *);
 
 static boolean bind_key_fn(uchar, int (*)(void));
 static void commands_init(void);
@@ -490,11 +493,12 @@ doextcmd(void)
 
 /* format extended command flags for display */
 static char *
-doc_extcmd_flagstr(winid menuwin,
-                   /* if Null, add a footnote to the menu */
-                   const struct ext_func_tab *efp)
+doc_extcmd_flagstr(
+    winid menuwin,
+    const struct ext_func_tab *efp) /* if Null, add a footnote to the menu */
 {
     static char Abuf[10]; /* 5 would suffice: {'[','m','A',']','\0'} */
+    int clr = 0;
 
     /* note: tag shown for menu prefix is 'm' even if m-prefix action
        has been bound to some other key */
@@ -502,11 +506,11 @@ doc_extcmd_flagstr(winid menuwin,
         char qbuf[QBUFSZ];
         anything any = cg.zeroany;
 
-        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
                  "[A] Command autocompletes", MENU_ITEMFLAGS_NONE);
         Sprintf(qbuf, "[m] Command accepts '%s' prefix",
                 visctrl(cmd_from_func(do_reqmenu)));
-        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, qbuf,
+        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr, qbuf,
                  MENU_ITEMFLAGS_NONE);
         return (char *) 0;
     } else {
@@ -543,6 +547,7 @@ doextlist(void)
     boolean redisplay = TRUE, search = FALSE;
     static const char *const headings[] = { "Extended commands",
                                       "Debugging Extended Commands" };
+    int clr = 0;
 
     searchbuf[0] = '\0';
     menuwin = create_nhwindow(NHW_MENU);
@@ -551,16 +556,16 @@ doextlist(void)
         redisplay = FALSE;
         any = cg.zeroany;
         start_menu(menuwin, MENU_BEHAVE_STANDARD);
-        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
                  "Extended Commands List",
                  MENU_ITEMFLAGS_NONE);
-        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
                  "", MENU_ITEMFLAGS_NONE);
 
         Sprintf(buf, "Switch to %s commands that don't autocomplete",
                 menumode ? "including" : "excluding");
         any.a_int = 1;
-        add_menu(menuwin, &nul_glyphinfo, &any, 'a', 0, ATR_NONE, buf,
+        add_menu(menuwin, &nul_glyphinfo, &any, 'a', 0, ATR_NONE, clr, buf,
                  MENU_ITEMFLAGS_NONE);
 
         if (!*searchbuf) {
@@ -571,7 +576,7 @@ doextlist(void)
                having ':' as an explicit selector overrides the default
                menu behavior for it; we retain 's' as a group accelerator */
             add_menu(menuwin, &nul_glyphinfo, &any, ':', 's', ATR_NONE,
-                     "Search extended commands",
+                     clr, "Search extended commands",
                      MENU_ITEMFLAGS_NONE);
         } else {
             Strcpy(buf, "Switch back from search");
@@ -584,17 +589,17 @@ doextlist(void)
                work for interfaces which support ':' to search; use as a
                general menu command takes precedence over group accelerator */
             add_menu(menuwin, &nul_glyphinfo, &any, 's', ':', ATR_NONE,
-                     buf, MENU_ITEMFLAGS_NONE);
+                     clr, buf, MENU_ITEMFLAGS_NONE);
         }
         if (wizard) {
             any.a_int = 4;
-            add_menu(menuwin, &nul_glyphinfo, &any, 'z', 0, ATR_NONE,
+            add_menu(menuwin, &nul_glyphinfo, &any, 'z', 0, ATR_NONE, clr,
           onelist ? "Switch to showing debugging commands in separate section"
        : "Switch to showing all alphabetically, including debugging commands",
                      MENU_ITEMFLAGS_NONE);
         }
         any = cg.zeroany;
-        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+        add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
                  "", MENU_ITEMFLAGS_NONE);
         menushown[0] = menushown[1] = 0;
         n = 0;
@@ -637,7 +642,7 @@ doextlist(void)
                 if (!menushown[pass]) {
                     Strcpy(buf, headings[pass]);
                     add_menu(menuwin, &nul_glyphinfo, &any, 0, 0,
-                             iflags.menu_headings, buf,
+                             iflags.menu_headings, clr, buf,
                              MENU_ITEMFLAGS_NONE);
                     menushown[pass] = 1;
                 }
@@ -646,16 +651,16 @@ doextlist(void)
                 Sprintf(buf, " %-14s %4s %s", efp->ef_txt,
                         doc_extcmd_flagstr(menuwin, efp), efp->ef_desc);
                 add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                         buf, MENU_ITEMFLAGS_NONE);
+                         clr, buf, MENU_ITEMFLAGS_NONE);
                 ++n;
             }
             if (n)
                 add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                         "", MENU_ITEMFLAGS_NONE);
+                         clr, "", MENU_ITEMFLAGS_NONE);
         }
         if (*searchbuf && !n)
             add_menu(menuwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                     "no matches", MENU_ITEMFLAGS_NONE);
+                     clr, "no matches", MENU_ITEMFLAGS_NONE);
         else
             (void) doc_extcmd_flagstr(menuwin, (struct ext_func_tab *) 0);
 
@@ -733,6 +738,7 @@ extcmd_via_menu(void)
     int accelerator, prevaccelerator;
     int matchlevel = 0;
     boolean wastoolong, one_per_line;
+    int clr = 0;
 
     ret = 0;
     cbuf[0] = '\0';
@@ -796,7 +802,7 @@ extcmd_via_menu(void)
                     Sprintf(buf, fmtstr, prompt);
                     any.a_char = prevaccelerator;
                     add_menu(win, &nul_glyphinfo, &any, any.a_char,
-                             0, ATR_NONE, buf, MENU_ITEMFLAGS_NONE);
+                             0, ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
                     acount = 0;
                     if (!(accelerator != prevaccelerator || one_per_line))
                         wastoolong = TRUE;
@@ -820,7 +826,7 @@ extcmd_via_menu(void)
             Sprintf(buf, fmtstr, prompt);
             any.a_char = prevaccelerator;
             add_menu(win, &nul_glyphinfo, &any, any.a_char, 0,
-                     ATR_NONE, buf, MENU_ITEMFLAGS_NONE);
+                     ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
         }
         Snprintf(prompt, sizeof(prompt), "Extended Command: %s", cbuf);
         end_menu(win, prompt);
@@ -983,6 +989,88 @@ wiz_identify(void)
     return ECMD_OK;
 }
 
+/* used when wiz_makemap() gets rid of monsters for the old incarnation of
+   a level before creating a new incarnation of it */
+static void
+makemap_unmakemon(struct monst *mtmp, boolean migratory)
+{
+    int ndx = monsndx(mtmp->data);
+
+    /* uncreate any unique monster so that it is eligible to be remade
+       on the new incarnation of the level; ignores DEADMONSTER() [why?] */
+    if (mtmp->data->geno & G_UNIQ)
+        g.mvitals[ndx].mvflags &= ~G_EXTINCT;
+    if (g.mvitals[ndx].born)
+        g.mvitals[ndx].born--;
+
+    /* vault is going away; get rid of guard who might be in play or
+       be parked at <0,0>; for the latter, might already be flagged as
+       dead but is being kept around because of the 'isgd' flag */
+    if (mtmp->isgd) {
+        mtmp->isgd = 0; /* after this, fall through to mongone() */
+    } else if (DEADMONSTER(mtmp)) {
+        return; /* already set to be discarded */
+    } else if (mtmp->isshk && on_level(&u.uz, &ESHK(mtmp)->shoplevel)) {
+        setpaid(mtmp);
+    }
+    if (migratory) {
+        /* caller has removed 'mtmp' from migrating_mons; put it onto fmon
+           so that dmonsfree() bookkeeping for number of dead or removed
+           monsters won't get out of sync; it is not on the map but
+           mongone() -> m_detach() -> mon_leaving_level() copes with that */
+        mtmp->mstate |= MON_OFFMAP;
+        mtmp->mstate &= ~(MON_MIGRATING | MON_LIMBO);
+        mtmp->nmon = fmon;
+        fmon = mtmp;
+    }
+    mongone(mtmp);
+}
+
+/* get rid of the all the monsters on--or intimately involved with--current
+   level; used when #wizmakemap destroys the level before replacing it */
+static void
+makemap_remove_mons(void)
+{
+    struct monst *mtmp, **mprev;
+
+    /* keep steed and other adjacent pets after releasing them
+       from traps, stopping eating, &c as if hero were ascending */
+    keepdogs(TRUE); /* (pets-only; normally we'd be using 'FALSE') */
+    /* get rid of all the monsters that didn't make it to 'mydogs' */
+    for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
+        /* if already dead, dmonsfree(below) will get rid of it */
+        if (DEADMONSTER(mtmp))
+            continue;
+        makemap_unmakemon(mtmp, FALSE);
+    }
+    /* some monsters retain details of this level in mon->mextra; that
+       data becomes invalid when the level is replaced by a new one;
+       get rid of them now if migrating or already arrived elsewhere;
+       [when on their 'home' level, the previous loop got rid of them;
+       if they aren't actually migrating but have been placed on some
+       'away' level, such monsters are treated like the Wizard:  kept
+       on migrating monsters list, scheduled to migrate back to their
+       present location instead of being saved with whatever level they
+       happen to be on; see keepdogs() and keep_mon_accessible(dog.c)] */
+    for (mprev = &g.migrating_mons; (mtmp = *mprev) != 0; ) {
+        if (mtmp->mextra
+            && ((mtmp->isshk && on_level(&u.uz, &ESHK(mtmp)->shoplevel))
+                || (mtmp->ispriest && on_level(&u.uz, &EPRI(mtmp)->shrlevel))
+                || (mtmp->isgd && on_level(&u.uz, &EGD(mtmp)->gdlevel)))) {
+            *mprev = mtmp->nmon;
+            makemap_unmakemon(mtmp, TRUE);
+        } else {
+            mprev = &mtmp->nmon;
+        }
+    }
+    /* release dead and 'unmade' monsters */
+    dmonsfree();
+    if (fmon) {
+        impossible("makemap_remove_mons: 'fmon' did not get emptied?");
+    }
+    return;
+}
+
 void
 makemap_prepost(boolean pre, boolean wiztower)
 {
@@ -990,26 +1078,8 @@ makemap_prepost(boolean pre, boolean wiztower)
     struct monst *mtmp;
 
     if (pre) {
-        /* keep steed and other adjacent pets after releasing them
-           from traps, stopping eating, &c as if hero were ascending */
-        keepdogs(TRUE); /* (pets-only; normally we'd be using 'FALSE' here) */
-
-        rm_mapseen(ledger_no(&u.uz));
-        for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-            int ndx = monsndx(mtmp->data);
-            if (mtmp->isgd) { /* vault is going away; get rid of guard */
-                mtmp->isgd = 0;
-                mongone(mtmp);
-            }
-            if (mtmp->data->geno & G_UNIQ)
-                g.mvitals[ndx].mvflags &= ~(G_EXTINCT);
-            if (g.mvitals[ndx].born)
-                g.mvitals[ndx].born--;
-            if (DEADMONSTER(mtmp))
-                continue;
-            if (mtmp->isshk)
-                setpaid(mtmp);
-        }
+        makemap_remove_mons();
+        rm_mapseen(ledger_no(&u.uz)); /* discard overview info for level */
         {
             static const char Unachieve[] = "%s achievement revoked.";
 
@@ -1140,7 +1210,7 @@ static int
 wiz_where(void)
 {
     if (wizard)
-        (void) print_dungeon(FALSE, (schar *) 0, (xchar *) 0);
+        (void) print_dungeon(FALSE, (schar *) 0, (xint16 *) 0);
     else
         pline(unavailcmd, ecname_from_fn(wiz_where));
     return ECMD_OK;
@@ -1210,15 +1280,17 @@ wiz_kill(void)
                we issue our own message in order to name it in case it
                isn't; note that if it triggers other kills, those might
                be referred to as "it" */
-            if (!iflags.menu_requested) {
-                boolean namedpet = has_mgivenname(mtmp) && !Hallucination;
+            int tame = !!mtmp->mtame, seen = canspotmon(mtmp),
+                flgs = SUPPRESS_IT | SUPPRESS_HALLUCINATION
+                       | ((tame && has_mgivenname(mtmp)) ? SUPPRESS_SADDLE : 0),
+                articl = tame ? ARTICLE_YOUR : seen ? ARTICLE_THE : ARTICLE_A;
+            const char *adjs = tame ? (!seen ? "poor, unseen" : "poor")
+                                    : (!seen ? "unseen" : (const char *) 0);
+            char *Mn = x_monnam(mtmp, articl, adjs, flgs, FALSE);
 
+            if (!iflags.menu_requested) {
                 /* normal case: hero is credited/blamed */
-                You("%s %s!", nonliving(mtmp->data) ? "destroy" : "kill",
-                    !mtmp->mtame ? noit_mon_nam(mtmp)
-                    : x_monnam(mtmp, ARTICLE_YOUR, "poor",
-                               SUPPRESS_IT | (namedpet ? SUPPRESS_SADDLE : 0),
-                               FALSE));
+                You("%s %s!", nonliving(mtmp->data) ? "destroy" : "kill", Mn);
                 xkilled(mtmp, XKILL_NOMSG);
             } else { /* 'm'-prefix */
                 /* we know that monsters aren't moving because player has
@@ -1227,9 +1299,9 @@ wiz_kill(void)
                    need to have the mon_moving flag be True in order to
                    avoid blaming or crediting hero for their deaths */
                 g.context.mon_moving = TRUE;
-                pline("%s is %s.", noit_Monnam(mtmp),
+                pline("%s is %s.", upstart(Mn),
                       nonliving(mtmp->data) ? "destroyed" : "killed");
-                /* Null second arg suppresses message */
+                /* Null second arg suppresses the usual message */
                 monkilled(mtmp, (char *) 0, AD_PHYS);
                 g.context.mon_moving = FALSE;
             }
@@ -1410,7 +1482,7 @@ wiz_telekinesis(void)
             }
         }
 
-    } while (TRUE);
+    } while (u.utotype == UTOTYPE_NONE);
     return ECMD_OK;
 }
 
@@ -1435,7 +1507,7 @@ wiz_panic(void)
 static int
 wiz_polyself(void)
 {
-    polyself(1);
+    polyself(POLY_CONTROLLED);
     return ECMD_OK;
 }
 
@@ -1444,7 +1516,8 @@ static int
 wiz_show_seenv(void)
 {
     winid win;
-    int x, y, v, startx, stopx, curx;
+    coordxy x, y, startx, stopx, curx;
+    int v;
     char row[COLNO + 1];
 
     win = create_nhwindow(NHW_TEXT);
@@ -1488,7 +1561,8 @@ static int
 wiz_show_vision(void)
 {
     winid win;
-    int x, y, v;
+    coordxy x, y;
+    int v;
     char row[COLNO + 1];
 
     win = create_nhwindow(NHW_TEXT);
@@ -1523,10 +1597,10 @@ static int
 wiz_show_wmodes(void)
 {
     winid win;
-    int x, y;
+    coordxy x, y;
     char row[COLNO + 1];
     struct rm *lev;
-    boolean istty = WINDOWPORT("tty");
+    boolean istty = WINDOWPORT(tty);
 
     win = create_nhwindow(NHW_TEXT);
     if (istty)
@@ -1559,7 +1633,8 @@ static void
 wiz_map_levltyp(void)
 {
     winid win;
-    int x, y, terrain;
+    coordxy x, y;
+    int terrain;
     char row[COLNO + 1];
     boolean istty = !strcmp(windowprocs.name, "tty");
 
@@ -1835,6 +1910,7 @@ wiz_intrinsic(void)
         long oldtimeout, newtimeout;
         const char *propname;
         menu_item *pick_list = (menu_item *) 0;
+        int clr = 0;
 
         any = cg.zeroany;
         win = create_nhwindow(NHW_MENU);
@@ -1845,7 +1921,7 @@ wiz_intrinsic(void)
         "[Precede any selection with a count to increment by other than %d.]",
                     DEFAULT_TIMEOUT_INCR);
             any.a_int = 0;
-            add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, buf,
+            add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr, buf,
                      MENU_ITEMFLAGS_NONE);
         }
         for (i = 0; (propname = propertynames[i].prop_name) != 0; ++i) {
@@ -1863,7 +1939,7 @@ wiz_intrinsic(void)
                    set to timed values here so show a separator */
                 any.a_int = 0;
                 add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                         ATR_NONE, "--", MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, "--", MENU_ITEMFLAGS_NONE);
             }
             any.a_int = i + 1; /* +1: avoid 0 */
             oldtimeout = u.uprops[p].intrinsic & TIMEOUT;
@@ -1871,7 +1947,7 @@ wiz_intrinsic(void)
                 Sprintf(buf, "%-27s [%li]", propname, oldtimeout);
             else
                 Sprintf(buf, "%s", propname);
-            add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, buf,
+            add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr, buf,
                      MENU_ITEMFLAGS_NONE);
         }
         end_menu(win, "Which intrinsics?");
@@ -1988,6 +2064,7 @@ doterrain(void)
     anything any;
     int n;
     int which;
+    int clr = 0;
 
     /*
      * normal play: choose between known map without mons, obj, and traps
@@ -2003,30 +2080,30 @@ doterrain(void)
     start_menu(men, MENU_BEHAVE_STANDARD);
     any = cg.zeroany;
     any.a_int = 1;
-    add_menu(men, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+    add_menu(men, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
              "known map without monsters, objects, and traps",
              MENU_ITEMFLAGS_SELECTED);
     any.a_int = 2;
     add_menu(men, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-             "known map without monsters and objects",
+             clr, "known map without monsters and objects",
              MENU_ITEMFLAGS_NONE);
     any.a_int = 3;
     add_menu(men, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-             "known map without monsters",
+             clr, "known map without monsters",
              MENU_ITEMFLAGS_NONE);
     if (discover || wizard) {
         any.a_int = 4;
         add_menu(men, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                 "full map without monsters, objects, and traps",
+                 clr, "full map without monsters, objects, and traps",
                  MENU_ITEMFLAGS_NONE);
         if (wizard) {
             any.a_int = 5;
             add_menu(men, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                     "internal levl[][].typ codes in base-36",
+                     clr, "internal levl[][].typ codes in base-36",
                      MENU_ITEMFLAGS_NONE);
             any.a_int = 6;
             add_menu(men, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                     "legend of base-36 levl[][].typ codes",
+                     clr, "legend of base-36 levl[][].typ codes",
                      MENU_ITEMFLAGS_NONE);
         }
     }
@@ -2487,6 +2564,11 @@ struct ext_func_tab extcmdlist[] = {
               doremring, 0, NULL },
     { C('a'), "repeat", "repeat a previous command",
               do_repeat, IFBURIED | GENERALCMD, NULL },
+    /* "modify command" is a vague description for use as no-autopickup,
+       no-attack movement as well as miscellaneous non-movement things;
+       key2extcmddesc() constructs a more explicit two line description
+       for display by the '&' command and expects to find "prefix:" as
+       the start of the text here */
     { 'm',    "reqmenu", "prefix: request menu or modify command",
               do_reqmenu, PREFIXCMD, NULL },
     { C('_'), "retravel", "travel to previously selected travel location",
@@ -2552,7 +2634,6 @@ struct ext_func_tab extcmdlist[] = {
     { '\177', "terrain",
               "view map without monsters or objects obstructing it",
               doterrain, IFBURIED | AUTOCOMPLETE, NULL },
-    /* therecmdmenu does not work as intended, should probably be removed */
     { '\0',   "therecmdmenu",
               "menu of commands you can do from here to adjacent spot",
               dotherecmdmenu, AUTOCOMPLETE | GENERALCMD, NULL },
@@ -2824,7 +2905,19 @@ key2extcmddesc(uchar key)
     /* finally, check whether 'key' is a command */
     if (g.Cmd.commands[key] && (txt = g.Cmd.commands[key]->ef_txt) != 0) {
         Sprintf(key2cmdbuf, "%s (#%s)", g.Cmd.commands[key]->ef_desc, txt);
-        /* special case: 'txt' for '#' is "#" and showing that as
+
+        /* special case: for reqmenu prefix (normally 'm'), replace
+           "prefix: request menu or modify command (#reqmenu)"
+           with two-line "movement prefix:...\nnon-movement prefix:..." */
+        if (!strncmpi(key2cmdbuf, "prefix:", 7) && !strcmpi(txt, "reqmenu"))
+            (void) strsubst(key2cmdbuf, "prefix:",
+                     /* relies on implicit concatenation of literal strings */
+                            "movement prefix:"
+                            " move without autopickup and without attacking"
+                            "\n"
+                            "non-movement prefix:"); /* and rest of buf */
+
+        /* another special case: 'txt' for '#' is "#" and showing that as
            "perform an extended command (##)" looks silly; strip "(##)" off */
         return strsubst(key2cmdbuf, " (##)", "");
     }
@@ -3611,10 +3704,25 @@ wiz_show_stats(void)
 
 RESTORE_WARNING_FORMAT_NONLITERAL
 
+static void
+you_sanity_check(void)
+{
+    if (u.uswallow && !u.ustuck) {
+        /* this probably ought to be panic() */
+        impossible("sanity_check: swallowed by nothing?");
+        display_nhwindow(WIN_MESSAGE, TRUE);
+        /* try to recover from whatever the problem is */
+        u.uswallow = 0;
+        u.uswldtim = 0;
+        docrt();
+    }
+    (void) check_invent_gold("invent");
+}
+
 void
 sanity_check(void)
 {
-    (void) check_invent_gold("invent");
+    you_sanity_check();
     obj_sanity_check();
     timer_sanity_check();
     mon_sanity_check();
@@ -3624,26 +3732,125 @@ sanity_check(void)
 }
 
 #ifdef DEBUG_MIGRATING_MONS
+static void list_migrating_mons(d_level *);
+
+/* called by #migratemons; might turn it into separate wizard mode command */
+static void
+list_migrating_mons(
+    d_level *nextlevl) /* default destination for wiz_migrate_mons() */
+{
+    winid win = WIN_ERR;
+    boolean showit = FALSE;
+    int n, xyloc;
+    coordxy x, y;
+    char c, prmpt[10], xtra[10], buf[BUFSZ];
+    struct monst *mtmp;
+    int here = 0, nxtlv = 0, other = 0;
+
+    for (mtmp = g.migrating_mons; mtmp; mtmp = mtmp->nmon) {
+        if (mtmp->mux == u.uz.dnum && mtmp->muy == u.uz.dlevel)
+            ++here;
+        else if (mtmp->mux == nextlevl->dnum && mtmp->muy == nextlevl->dlevel)
+            ++nxtlv;
+        else
+            ++other;
+    }
+    if (here + nxtlv + other == 0) {
+        pline("No monsters currently migrating.");
+    } else {
+        pline(
+      "%d mon%s pending for current level, %d for next level, %d for others.",
+              here, plur(here), nxtlv, other);
+        prmpt[0] = xtra[0] = '\0';
+        (void) strkitten(here ? prmpt : xtra, 'c');
+        (void) strkitten(nxtlv ? prmpt : xtra, 'n');
+        (void) strkitten(other ? prmpt : xtra, 'o');
+        Strcat(prmpt, "a q");
+        if (*xtra)
+            Sprintf(eos(prmpt), "%c%s", '\033', xtra);
+        c = yn_function("List which?", prmpt, 'q');
+        n = (c == 'c') ? here
+            : (c == 'n') ? nxtlv
+              : (c == 'o') ? other
+                : (c == 'a') ? here + nxtlv + other
+                  : 0;
+        if (n > 0) {
+            win = create_nhwindow(NHW_TEXT);
+            switch (c) {
+            case 'c':
+            case 'n':
+            case 'o':
+                Sprintf(buf, "Monster%s migrating to %s:", plur(n),
+                        (c == 'c') ? "current level"
+                        : (c == 'n') ? "next level"
+                          : "'other' levels");
+                break;
+            default:
+                Strcpy(buf, "All migrating monsters:");
+                break;
+            }
+            putstr(win, 0, buf);
+            putstr(win, 0, "");
+            /* TODO? make multiple passes in order to show mons in
+               destination order */
+            for (mtmp = g.migrating_mons; mtmp; mtmp = mtmp->nmon) {
+                if (c == 'a')
+                    showit = TRUE;
+                else if (mtmp->mux == u.uz.dnum && mtmp->muy == u.uz.dlevel)
+                    showit = (c == 'c');
+                else if (mtmp->mux == nextlevl->dnum
+                         && mtmp->muy == nextlevl->dlevel)
+                    showit = (c = 'n');
+                else
+                    showit = (c == 'o');
+
+                if (showit) {
+                    Sprintf(buf, "  %s", minimal_monnam(mtmp, FALSE));
+                    /* minimal_monnam() appends map coordinates; strip that */
+                    (void) strsubst(buf, " <0,0>", "");
+                    if (c == 'o' || c == 'a')
+                        Sprintf(eos(buf), " to %d:%d", mtmp->mux, mtmp->muy);
+                    xyloc = mtmp->mtrack[0].x; /* (for legibility) */
+                    if (xyloc == MIGR_EXACT_XY) {
+                        x = mtmp->mtrack[1].x;
+                        y = mtmp->mtrack[1].y;
+                        Sprintf(eos(buf), " at <%d,%d>", (int) x, (int) y);
+                    }
+                    putstr(win, 0, buf);
+                }
+            }
+            display_nhwindow(win, FALSE);
+            destroy_nhwindow(win);
+        } else if (c != 'q') {
+            pline("None.");
+        }
+
+    }
+}
+
 static int
 wiz_migrate_mons(void)
 {
-    int mcount = 0;
+    int mcount;
     char inbuf[BUFSZ] = DUMMY;
     struct permonst *ptr;
     struct monst *mtmp;
     d_level tolevel;
 
-    getlin("How many random monsters to migrate? [0]", inbuf);
+    if (Is_stronghold(&u.uz))
+        assign_level(&tolevel, &valley_level);
+    else
+        get_level(&tolevel, depth(&u.uz) + 1);
+
+    list_migrating_mons(&tolevel);
+
+    getlin("How many random monsters to migrate to next level? [0]", inbuf);
     if (*inbuf == '\033')
         return ECMD_OK;
     mcount = atoi(inbuf);
     if (mcount < 0 || mcount > (COLNO * ROWNO) || Is_botlevel(&u.uz))
         return ECMD_OK;
     while (mcount > 0) {
-        if (Is_stronghold(&u.uz))
-            assign_level(&tolevel, &valley_level);
-        else
-            get_level(&tolevel, depth(&u.uz) + 1);
         ptr = rndmonst();
         mtmp = makemon(ptr, 0, 0, MM_NOMSG);
         if (mtmp)
@@ -3653,7 +3860,7 @@ wiz_migrate_mons(void)
     }
     return ECMD_OK;
 }
-#endif
+#endif /* DEBUG_MIGRATING_MONS */
 
 static struct {
     int nhkf;
@@ -3664,6 +3871,7 @@ static struct {
     { NHKF_GETDIR_SELF,      '.', "getdir.self" },
     { NHKF_GETDIR_SELF2,     's', "getdir.self2" },
     { NHKF_GETDIR_HELP,      '?', "getdir.help" },
+    { NHKF_GETDIR_MOUSE,     '_', "getdir.mouse" },
     { NHKF_COUNT,            'n', "count" },
     { NHKF_GETPOS_SELF,      '@', "getpos.self" },
     { NHKF_GETPOS_PICK,      '.', "getpos.pick" },
@@ -4063,7 +4271,6 @@ void
 rhack(char *cmd)
 {
     char queuedkeystroke[2];
-    int spkey = NHKF_ESC;
     boolean bad_command, firsttime = (cmd == 0);
     struct _cmd_queue cq, *cmdq = NULL;
     const struct ext_func_tab *cmdq_ec = 0, *prefix_seen = 0;
@@ -4124,17 +4331,31 @@ rhack(char *cmd)
             } else if (prefix_seen && !(tlist->flags & PREFIXCMD)
                        && !(tlist->flags & (was_m_prefix ? CMD_M_PREFIX
                                                          : CMD_gGF_PREFIX))) {
-                /* got prefix previously but this command doesn't accept one */
                 char pfxidx = cmd_from_func(prefix_seen->ef_funct);
                 const char *which = (pfxidx != 0) ? visctrl(pfxidx)
                                     : (prefix_seen->ef_funct == do_reqmenu)
                                       ? "move-no-pickup or request-menu"
                                       : prefix_seen->ef_txt;
 
-                pline("The %s command does not accept '%s' prefix.",
-                      tlist->ef_txt, which);
-                reset_cmd_vars(TRUE);
-                res = ECMD_OK;
+                /*
+                 * We got a prefix previously and looped for another
+                 * command instead of returning, but the command we got
+                 * doesn't accept a prefix.  The feedback here supersedes
+                 * the former call to help_dir() (for 'bad_command' below).
+                 */
+                if (was_m_prefix) {
+                    pline("The %s command does not accept '%s' prefix.",
+                          tlist->ef_txt, which);
+                } else {
+                    uchar key = tlist->key;
+                    boolean up = (key == '<' || tlist->ef_funct == doup),
+                            down = (key == '>' || tlist->ef_funct == dodown);
+
+                    pline(
+                  "The '%s' prefix should be followed by a movement command%s.",
+                          which, (up || down) ? " other than up or down" : "");
+                }
+                res = ECMD_FAIL;
                 prefix_seen = 0;
                 was_m_prefix = FALSE;
             } else {
@@ -4226,8 +4447,14 @@ rhack(char *cmd)
         expcmd[0] = '\0';
         while ((c = *cmd++) != '\0')
             Strcat(expcmd, visctrl(c)); /* add 1..4 chars plus terminator */
-
-        if (!prefix_seen || !help_dir(c1, spkey, "Invalid direction key!"))
+#if 1
+        nhUse(c1);
+#else
+        /* note: since prefix keys became actual commnads, we can no longer get
+           here with 'prefix_seen' set so this never calls help_dir() anymore */
+        if (!prefix_seen
+            || !help_dir(c1, prefix_seen->key, "Invalid direction key!"))
+#endif
             Norep("Unknown command '%s'.", expcmd);
         cmdq_clear();
         savech(0); /* clear do-again queue */
@@ -4239,8 +4466,8 @@ rhack(char *cmd)
 }
 
 /* convert an x,y pair into a direction code */
-int
-xytod(schar x, schar y)
+coordxy
+xytod(coordxy x, coordxy y)
 {
     register int dd;
 
@@ -4320,10 +4547,13 @@ redraw_cmd(char c)
  * Returns non-zero if coordinates in cc are valid.
  */
 int
-get_adjacent_loc(const char *prompt, const char *emsg,
-                 xchar x, xchar y, coord *cc)
+get_adjacent_loc(
+    const char *prompt,
+    const char *emsg,
+    coordxy x, coordxy y,
+    coord *cc)
 {
-    xchar new_x, new_y;
+    coordxy new_x, new_y;
     if (!getdir(prompt)) {
         pline1(Never_mind);
         return 0;
@@ -4341,6 +4571,8 @@ get_adjacent_loc(const char *prompt, const char *emsg,
     return 1;
 }
 
+/* prompt for a direction (specified via movement keystroke) and return it
+   in u.dx, u.dy, and u.dz; function return value is 1 for ok, 0 otherwise */
 int
 getdir(const char *s)
 {
@@ -4383,6 +4615,76 @@ getdir(const char *s)
     if (dirsym == g.Cmd.spkeys[NHKF_GETDIR_SELF]
         || dirsym == g.Cmd.spkeys[NHKF_GETDIR_SELF2]) {
         u.dx = u.dy = u.dz = 0;
+    } else if (dirsym == g.Cmd.spkeys[NHKF_GETDIR_MOUSE]) {
+        char qbuf[QBUFSZ];
+        coord cc;
+        int pos, mod;
+
+        /*
+         * For #therecmdmenu:
+         * Player has entered the 'simulated mouse' key ('_' by default)
+         * at the "which direction?" prompt so we use getpos() to get a
+         * simulated click after moving cursor to the desired location.
+         *
+         * getpos() returns 0..3 for period, comma, semi-colon, colon.
+         * We treat "," as left click and "." as right click due to
+         * their positions relative to each other on the keyboard.
+         * Using ";" as synonym for "," and ":" for "." is due to their
+         * shapes rather than to their keyboard location.
+         *
+         * Those keys aren't separately bindable for being treated as
+         * clicks but we do honor their getpos bindings if player has
+         * changed them.  (Bound values might have scrambled keyboard
+         * locations relative to each other so ruin the memory aid of
+         * "," being left of ".".)
+         */
+        Sprintf(qbuf,
+            "desired location, then type '%s' for left click, '%s' for right",
+                /* visctrl() cycles through several static buffers for its
+                   return value so using two in the same expression is ok */
+                visctrl(g.Cmd.spkeys[NHKF_GETPOS_PICK_Q]), /* ',' */
+                visctrl(g.Cmd.spkeys[NHKF_GETPOS_PICK])); /* '.' */
+        cc.x = u.ux, cc.y = u.uy; /* starting cursor location for getpos() */
+        pos = getpos(&cc, TRUE, qbuf);
+
+        if (pos < 0) {
+            /* ESC or other rejection */
+            u.dx = u.dy = u.dz = 0;
+            mod = 0; /* neither CLICK_1 nor CLICK_2 */
+        } else {
+            /* caller expects simulated click to be relative to hero's spot */
+            u.dx = cc.x - u.ux;
+            u.dy = cc.y - u.uy;
+            /* non-zero getdir_click actually means ok to click farther than
+               one spot away from hero; adjacent click is always allowed */
+            if (!iflags.getdir_click) {
+                u.dx = sgn(u.dx);
+                u.dy = sgn(u.dy);
+            }
+            u.dz = 0;
+
+            switch (pos + NHKF_GETPOS_PICK) {
+            case NHKF_GETPOS_PICK_Q: /* 1: quick:   ',' */
+            case NHKF_GETPOS_PICK_O: /* 2: once:    ';' */
+                mod = CLICK_1;
+                break;
+            case NHKF_GETPOS_PICK:   /* 0: normal:  '.' */
+            case NHKF_GETPOS_PICK_V: /* 3: verbose: ':' */
+                mod = CLICK_2;
+                break;
+            default:
+                /* could plug in bound values for spkeys[NHKF_GETPOS_PICK],&c
+                   but that feels like overkill for something which should
+                   never happen; just show their default values */
+                impossible("getpos successful but not one of [.,;:] (%d)",
+                           pos);
+                mod = 0; /* neither CLICK_1 nor CLICK_2 */
+                pos = -1; /* return failure */
+                break;
+            }
+        }
+        iflags.getdir_click = mod;
+        return (pos >= 0);
     } else if (!(is_mov = movecmd(dirsym, MV_ANY)) && !u.dz) {
         boolean did_help = FALSE, help_requested;
 
@@ -4390,9 +4692,9 @@ getdir(const char *s)
             help_requested = (dirsym == g.Cmd.spkeys[NHKF_GETDIR_HELP]);
             if (help_requested || iflags.cmdassist) {
                 did_help = help_dir((s && *s == '^') ? dirsym : '\0',
-                                    NHKF_ESC,
+                                    g.Cmd.spkeys[NHKF_ESC],
                                     help_requested ? (const char *) 0
-                                                  : "Invalid direction key!");
+                                                   : "Invalid direction key!");
                 if (help_requested)
                     goto retry;
             }
@@ -4404,8 +4706,8 @@ getdir(const char *s)
         You_cant("orient yourself that direction.");
         return 0;
     }
-    if (!u.dz && (Stunned || (Confusion && !rn2(5))))
-        confdir();
+    if (!u.dz)
+        confdir(FALSE);
     return 1;
 }
 
@@ -4459,29 +4761,33 @@ show_direction_keys(
    an invalid direction after a prefix key ('F', 'g', 'm', &c), which
    might be bogus but could be up, down, or self when not applicable */
 static boolean
-help_dir(char sym,
-         int spkey, /* NHKF_ code for prefix key, if used, or for ESC */
-         const char *msg)
+help_dir(
+    char sym,
+    uchar spkey, /* actual key; either prefix or ESC */
+    const char *msg)
 {
     static const char wiz_only_list[] = "EFGIVW";
     char ctrl;
     winid win;
     char buf[BUFSZ], buf2[BUFSZ], *explain;
-    const char *dothat, *how;
-    boolean prefixhandling, viawindow;
+    const char *dothat /*, *how */;
+    boolean prefixhandling /*, viawindow */;
 
     /* NHKF_ESC indicates that player asked for help at getdir prompt */
-    viawindow = (spkey == NHKF_ESC || iflags.cmdassist);
-    prefixhandling = (spkey != NHKF_ESC);
+    /* viawindow = (spkey == g.Cmd.spkeys[NHKF_ESC] || iflags.cmdassist); */
+    prefixhandling = (spkey != g.Cmd.spkeys[NHKF_ESC]);
     /*
      * Handling for prefix keys that don't want special directions.
      * Delivered via pline if 'cmdassist' is off, or instead of the
      * general message if it's on.
      */
     dothat = "do that";
-    how = " at"; /* for "<action> at yourself"; not used for up/down */
+    /* how = " at"; */ /* for "<action> at yourself"; not used for up/down */
 
     buf[0] = '\0';
+#if 0   /* Since prefix keys got 'promoted' to commands, feedback for
+         * invalid prefix is done in rhack() these days.
+         */
     /* for movement prefix followed by '.' or (numpad && 's') to mean 'self';
        note: '-' for hands (inventory form of 'self') is not handled here */
     if (prefixhandling
@@ -4502,13 +4808,16 @@ help_dir(char sym,
         if (prefixhandling) {
             if (!*buf)
                 Sprintf(buf, "Invalid direction for '%s' prefix.",
-                        visctrl(g.Cmd.spkeys[spkey]));
+                        visctrl(spkey));
             pline("%s", buf);
             return TRUE;
         }
         /* when 'cmdassist' is off and caller doesn't insist, do nothing */
         return FALSE;
     }
+#else
+    nhUse(prefixhandling);
+#endif
 
     win = create_nhwindow(NHW_TEXT);
     if (!win)
@@ -4579,14 +4888,16 @@ help_dir(char sym,
     return TRUE;
 }
 
+/* if hero is impaired, pick random movement direction */
 void
-confdir(void)
+confdir(boolean force_impairment)
 {
-    register int x = NODIAG(u.umonnum) ? dirs_ord[rn2(4)] : rn2(N_DIRS);
+    if (force_impairment || u_maybe_impaired()) {
+        register coordxy x = NODIAG(u.umonnum) ? dirs_ord[rn2(4)] : rn2(N_DIRS);
 
-    u.dx = xdir[x];
-    u.dy = ydir[x];
-    return;
+        u.dx = xdir[x];
+        u.dy = ydir[x];
+    }
 }
 
 const char *
@@ -4603,7 +4914,7 @@ directionname(int dir)
 }
 
 int
-isok(register int x, register int y)
+isok(register coordxy x, register coordxy y)
 {
     /* x corresponds to curx, so x==1 is the first column. Ach. %% */
     return x >= 1 && x <= COLNO - 1 && y >= 0 && y <= ROWNO - 1;
@@ -4623,12 +4934,18 @@ static int
 dotherecmdmenu(void)
 {
     char ch;
+    int dir, click;
 
-    if (!getdir((const char *) 0) || !isok(u.ux + u.dx, u.uy + u.dy))
+    iflags.getdir_click = CLICK_1 | CLICK_2; /* allow 'far' click */
+    dir = getdir((const char *) 0);
+    click = iflags.getdir_click;
+    iflags.getdir_click = 0;
+
+    if (!dir || !isok(u.ux + u.dx, u.uy + u.dy))
         return ECMD_CANCEL;
 
     if (u.dx || u.dy)
-        ch = there_cmd_menu(u.ux + u.dx, u.uy + u.dy, CLICK_1);
+        ch = there_cmd_menu(u.ux + u.dx, u.uy + u.dy, click);
     else
         ch = here_cmd_menu();
 
@@ -4681,17 +4998,18 @@ static void
 mcmd_addmenu(winid win, int act, const char *txt)
 {
     anything any;
+    int clr = 0;
 
     /* TODO: fixed letters for the menu entries? */
     any = cg.zeroany;
     any.a_int = act;
-    add_menu(win, &nul_glyphinfo, &any, '\0', 0, ATR_NONE, txt,
+    add_menu(win, &nul_glyphinfo, &any, '\0', 0, ATR_NONE, clr, txt,
              MENU_ITEMFLAGS_NONE);
 }
 
 /* command menu entries when targeting self */
 static int
-there_cmd_menu_self(winid win, int x, int y, int *act UNUSED)
+there_cmd_menu_self(winid win, coordxy x, coordxy y, int *act UNUSED)
 {
     int K = 0;
     char buf[BUFSZ];
@@ -4779,7 +5097,7 @@ there_cmd_menu_self(winid win, int x, int y, int *act UNUSED)
 static int
 there_cmd_menu_next2u(
     winid win,
-    int x, int y,
+    coordxy x, coordxy y,
     int mod,
     int *act)
 {
@@ -4871,49 +5189,66 @@ there_cmd_menu_next2u(
 }
 
 static int
-there_cmd_menu_far(winid win, xchar x, xchar y, int mod)
+there_cmd_menu_far(winid win, coordxy x, coordxy y, int mod)
 {
     int K = 0;
 
-    if (mod != CLICK_2)
-        return K;
+    if (mod == CLICK_1) {
+        if (linedup(u.ux, u.uy, x, y, 1)
+            && dist2(u.ux, u.uy, x, y) < 18*18)
+            mcmd_addmenu(win, MCMD_THROW_OBJ, "Throw something"), ++K;
 
-    if (linedup(u.ux, u.uy, x, y, 1) && (dist2(u.ux, u.uy, x, y) < 18*18)) {
-        mcmd_addmenu(win, MCMD_THROW_OBJ, "Throw something"), ++K;
-    }
-
-    if (flags.travelcmd) {
         mcmd_addmenu(win, MCMD_TRAVEL, "Travel here"), ++K;
     }
-
     return K;
 }
 
 static int
 there_cmd_menu_common(
     winid win,
-    xchar x UNUSED, xchar y UNUSED,
+    coordxy x UNUSED, coordxy y UNUSED,
     int mod,
     int *act UNUSED)
 {
     int K = 0;
 
-    if (mod == CLICK_2 && iflags.clicklook) {
+    if (mod == CLICK_1 || mod == CLICK_2) { /* ignore iflags.clicklook here */
         mcmd_addmenu(win, MCMD_LOOK_AT, "Look at map symbol"), ++K;
     }
-
     return K;
 }
 
+/* queue up command(s) to perform #therecmdmenu action */
 static void
-act_on_act(int act, int x, int y, int dx, int dy, int dir)
+act_on_act(
+    int act,                /* action */
+    coordxy dx, coordxy dy) /* delta to adjacent spot (farther sometimes) */
 {
     struct obj *otmp;
+    int dir;
+
+    /* a few there_cmd_menu_far() actions use dx,dy differently */
+    switch (act) {
+    case MCMD_THROW_OBJ:
+    case MCMD_TRAVEL:
+    case MCMD_LOOK_AT:
+        /* keep dx,dy as-is */
+        break;
+    default:
+        /* force dx and dy to be +1, 0, or -1 */
+        dx = sgn(dx);
+        dy = sgn(dy);
+        break;
+    }
 
     switch (act) {
     case MCMD_TRAVEL:
-        iflags.travelcc.x = u.tx = x;
-        iflags.travelcc.y = u.ty = y;
+        /* FIXME: player has explicilty picked "travel to this location"
+           from the menu but it will only work if flags.travelcmd is True.
+           That option is intended as way to guard against stray mouse
+           clicks and shouldn't inhibit explicit travel. */
+        iflags.travelcc.x = u.tx = u.ux + dx;
+        iflags.travelcc.y = u.ty = u.uy + dy;
         cmdq_add_ec(dotravel_target);
         break;
     case MCMD_THROW_OBJ:
@@ -4962,7 +5297,8 @@ act_on_act(int act, int x, int y, int dx, int dy, int dir)
         cmdq_add_dir(dx, dy, 0);
         break;
     case MCMD_MOVE_DIR:
-        cmdq_add_ec(move_funcs[xytod(dx, dy)][MV_WALK]);
+        dir = xytod(dx, dy);
+        cmdq_add_ec(move_funcs[dir][MV_WALK]);
         break;
     case MCMD_RIDE:
         cmdq_add_ec(doride);
@@ -4983,6 +5319,7 @@ act_on_act(int act, int x, int y, int dx, int dy, int dir)
         }
         break;
     case MCMD_ATTACK_NEXT2U:
+        dir = xytod(dx, dy);
         cmdq_add_ec(move_funcs[dir][MV_WALK]);
         break;
     case MCMD_TALK:
@@ -5041,8 +5378,8 @@ act_on_act(int act, int x, int y, int dx, int dy, int dir)
         cmdq_add_ec(dolook);
         break;
     case MCMD_LOOK_AT:
-        g.clicklook_cc.x = x;
-        g.clicklook_cc.y = y;
+        g.clicklook_cc.x = u.ux + dx;
+        g.clicklook_cc.y = u.uy + dy;
         cmdq_add_ec(doclicklook);
         break;
     case MCMD_UNTRAP_HERE:
@@ -5056,20 +5393,22 @@ act_on_act(int act, int x, int y, int dx, int dy, int dir)
     case MCMD_CAST_SPELL:
         cmdq_add_ec(docast);
         break;
-    default: break;
+    default:
+        break;
     }
 }
 
-/* offer choice of actions to perform at adjacent location <x,y> */
+/* offer choice of actions to perform at adjacent location <x,y>;
+   a few choices can be farther away */
 static char
-there_cmd_menu(int x, int y, int mod)
+there_cmd_menu(coordxy x, coordxy y, int mod)
 {
     winid win;
     char ch = '\0';
     int npick = 0, K = 0;
     menu_item *picks = (menu_item *) 0;
-    int dx = sgn(x - u.ux), dy = sgn(y - u.uy);
-    int dir = xytod(dx, dy);
+    /*int dx = sgn(x - u.ux), dy = sgn(y - u.uy);*/
+    coordxy dx = x - u.ux, dy = y - u.uy;
     int act = MCMD_NOTHING;
 
     win = create_nhwindow(NHW_MENU);
@@ -5085,18 +5424,21 @@ there_cmd_menu(int x, int y, int mod)
 
     if (!K) {
         /* no menu options, try to move */
-        if (next2u(x, y) && !test_move(u.ux, u.uy, dx, dy, TEST_MOVE))
+        if (next2u(x, y) && !test_move(u.ux, u.uy, dx, dy, TEST_MOVE)) {
+            int dir = xytod(dx, dy);
+
             cmdq_add_ec(move_funcs[dir][MV_WALK]);
-        else if (flags.travelcmd) {
+        } else if (flags.travelcmd) {
             iflags.travelcc.x = u.tx = x;
             iflags.travelcc.y = u.ty = y;
             cmdq_add_ec(dotravel_target);
         }
         npick = 0;
         ch = '\0';
-    } else if ((K == 1) && (act != MCMD_NOTHING)) {
+    } else if (K == 1 && act != MCMD_NOTHING && act != MCMD_TRAVEL) {
         destroy_nhwindow(win);
-        act_on_act(act, x, y, dx, dy, dir);
+
+        act_on_act(act, dx, dy);
         return '\0';
     } else {
         end_menu(win, "What do you want to do?");
@@ -5106,10 +5448,9 @@ there_cmd_menu(int x, int y, int mod)
     destroy_nhwindow(win);
     if (npick > 0) {
         act = picks->item.a_int;
-
         free((genericptr_t) picks);
 
-        act_on_act(act, x, y, dx, dy, dir);
+        act_on_act(act, dx, dy);
         return '\0';
     }
     return ch;
@@ -5126,7 +5467,7 @@ here_cmd_menu(void)
  * convert a MAP window position into a movement key usable with movecmd()
  */
 const char *
-click_to_cmd(int x, int y, int mod)
+click_to_cmd(coordxy x, coordxy y, int mod)
 {
     static char cmd[4];
     struct obj *o;
@@ -5428,7 +5769,7 @@ end_of_input(void)
 #endif /* HANGUPHANDLING */
 
 static char
-readchar_core(int *x, int *y, int *mod)
+readchar_core(coordxy *x, coordxy *y, int *mod)
 {
     register int sym;
 
@@ -5487,14 +5828,15 @@ char
 readchar(void)
 {
     char ch;
-    int x = u.ux, y = u.uy, mod = 0;
+    coordxy x = u.ux, y = u.uy;
+    int mod = 0;
 
     ch = readchar_core(&x, &y, &mod);
     return ch;
 }
 
 char
-readchar_poskey(int *x, int *y, int *mod)
+readchar_poskey(coordxy *x, coordxy *y, int *mod)
 {
     char ch;
 

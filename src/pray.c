@@ -22,6 +22,7 @@ static void gods_upset(aligntyp);
 static void consume_offering(struct obj *);
 static void offer_too_soon(aligntyp);
 static void desecrate_high_altar(aligntyp);
+static boolean pray_revive(void);
 static boolean water_prayer(boolean);
 static boolean blocked_boulder(int, int);
 
@@ -830,7 +831,7 @@ gcrownu(void)
                 ? "take lives"
                 : "steal souls");
         verbalize("Thou art chosen to %s for My Glory!", what);
-        livelog_printf(LL_DIVINEGIFT, "chosen to %s for the Glory of %s",
+        livelog_printf(LL_DIVINEGIFT, "was chosen to %s for the Glory of %s",
                        what, u_gname());
         break;
     }
@@ -853,7 +854,7 @@ gcrownu(void)
         /* not an artifact, but treat like one for this situation;
            classify as a spoiler in case player hasn't IDed the book yet */
         livelog_printf(LL_DIVINEGIFT | LL_ARTIFACT | LL_SPOILER,
-                       "bestowed with %s", bbuf);
+                       "was bestowed with %s", bbuf);
 
         /* when getting a new book for known spell, enhance
            currently wielded weapon rather than the book */
@@ -876,8 +877,8 @@ gcrownu(void)
             if (obj && obj->oartifact == ART_EXCALIBUR) {
                 u.ugifts++;
                 livelog_printf(LL_DIVINEGIFT | LL_ARTIFACT,
-                               "wielded %s transformed into %s",
-                               lbuf, artiname(ART_EXCALIBUR));
+                               "had %s wielded %s transformed into %s",
+                               uhis(), lbuf, artiname(ART_EXCALIBUR));
             }
         }
         /* acquire Excalibur's skill regardless of weapon or gift */
@@ -900,7 +901,8 @@ gcrownu(void)
             dropy(obj);
             u.ugifts++;
             livelog_printf(LL_DIVINEGIFT | LL_ARTIFACT,
-                           "bestowed with %s", artiname(ART_VORPAL_BLADE));
+                           "was bestowed with %s",
+                           artiname(ART_VORPAL_BLADE));
         }
         /* acquire Vorpal Blade's skill regardless of weapon or gift */
         unrestrict_weapon_skill(P_LONG_SWORD);
@@ -925,7 +927,8 @@ gcrownu(void)
             dropy(obj);
             u.ugifts++;
             livelog_printf(LL_DIVINEGIFT | LL_ARTIFACT,
-                           "bestowed with %s", artiname(ART_STORMBRINGER));
+                           "was bestowed with %s",
+                           artiname(ART_STORMBRINGER));
         }
         /* acquire Stormbringer's skill regardless of weapon or gift */
         unrestrict_weapon_skill(P_BROAD_SWORD);
@@ -1908,7 +1911,7 @@ dosacrifice(void)
                     u.ublesscnt = rnz(300 + (50 * nartifacts));
                     exercise(A_WIS, TRUE);
                     livelog_printf (LL_DIVINEGIFT | LL_ARTIFACT,
-                                    "bestowed with %s by %s",
+                                    "was bestowed with %s by %s",
                                     artiname(otmp->oartifact),
                                     align_gname(u.ualign.type));
                     /* make sure we can use this weapon */
@@ -1990,6 +1993,23 @@ can_pray(boolean praying) /* false means no messages should be given */
        This case should be uncommon enough to live with... */
 
     return !praying ? (boolean) (g.p_type == 3 && !Inhell) : TRUE;
+}
+
+/* return TRUE if praying revived a pet corpse */
+static boolean
+pray_revive(void)
+{
+    struct obj *otmp;
+
+    for (otmp = g.level.objects[u.ux][u.uy]; otmp; otmp = otmp->nexthere)
+        if (otmp->otyp == CORPSE && has_omonst(otmp)
+            && OMONST(otmp)->mtame && !OMONST(otmp)->isminion)
+            break;
+
+    if (!otmp)
+        return FALSE;
+
+    return (revive(otmp, TRUE) != NULL);
 }
 
 /* #pray commmand */
@@ -2100,8 +2120,10 @@ prayer_done(void) /* M. Stephenson (1.0.3b) */
             pleased(alignment);
     } else {
         /* coaligned */
-        if (on_altar())
+        if (on_altar()) {
+            (void) pray_revive();
             (void) water_prayer(TRUE);
+        }
         pleased(alignment); /* nice */
     }
     return 1;
@@ -2244,7 +2266,7 @@ doturn(void)
 }
 
 int
-altarmask_at(int x, int y)
+altarmask_at(coordxy x, coordxy y)
 {
     int res = 0;
 
@@ -2268,7 +2290,7 @@ a_gname(void)
 
 /* returns the name of an altar's deity */
 const char *
-a_gname_at(xchar x, xchar y)
+a_gname_at(coordxy x, coordxy y)
 {
     if (!IS_ALTAR(levl[x][y].typ))
         return (char *) 0;
@@ -2406,7 +2428,7 @@ align_gtitle(aligntyp alignment)
 }
 
 void
-altar_wrath(int x, int y)
+altar_wrath(coordxy x, coordxy y)
 {
     aligntyp altaralign = a_align(x, y);
 

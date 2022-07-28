@@ -1,4 +1,4 @@
-/* NetHack 3.7	apply.c	$NHDT-Date: 1652223183 2022/05/10 22:53:03 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.375 $ */
+/* NetHack 3.7	apply.c	$NHDT-Date: 1655631557 2022/06/19 09:39:17 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.381 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -7,7 +7,7 @@
 
 static int use_camera(struct obj *);
 static int use_towel(struct obj *);
-static boolean its_dead(int, int, int *);
+static boolean its_dead(coordxy, coordxy, int *);
 static int use_stethoscope(struct obj *);
 static void use_whistle(struct obj *);
 static void use_magic_whistle(struct obj *);
@@ -39,10 +39,10 @@ static int do_break_wand(struct obj *);
 static int apply_ok(struct obj *);
 static int flip_through_book(struct obj *);
 static boolean figurine_location_checks(struct obj *, coord *, boolean);
-static boolean check_jump(genericptr_t, int, int);
-static boolean is_valid_jump_pos(int, int, int, boolean);
-static boolean get_valid_jump_position(int, int);
-static boolean get_valid_polearm_position(int, int);
+static boolean check_jump(genericptr_t, coordxy, coordxy);
+static boolean is_valid_jump_pos(coordxy, coordxy, int, boolean);
+static boolean get_valid_jump_position(coordxy, coordxy);
+static boolean get_valid_polearm_position(coordxy, coordxy);
 static boolean find_poleable_mon(coord *, int, int);
 
 static const char no_elbow_room[] =
@@ -177,7 +177,7 @@ use_towel(struct obj *obj)
 
 /* maybe give a stethoscope message based on floor objects */
 static boolean
-its_dead(int rx, int ry, int *resp)
+its_dead(coordxy rx, coordxy ry, int *resp)
 {
     char buf[BUFSZ];
     boolean more_corpses;
@@ -302,7 +302,8 @@ use_stethoscope(struct obj *obj)
 {
     struct monst *mtmp;
     struct rm *lev;
-    int rx, ry, res;
+    int res;
+    coordxy rx, ry;
     boolean interference = (u.uswallow && is_whirly(u.ustuck->data)
                             && !rn2(Role_if(PM_HEALER) ? 10 : 3));
 
@@ -354,8 +355,7 @@ use_stethoscope(struct obj *obj)
         You_hear("your heart beat.");
         return res;
     }
-    if (Stunned || (Confusion && !rn2(5)))
-        confdir();
+    confdir(FALSE);
     if (!u.dx && !u.dy) {
         ustatusline();
         return res;
@@ -496,8 +496,9 @@ magic_whistled(struct obj *obj)
          shiftbuf[BUFSZ + sizeof "shifts location"],
          appearbuf[BUFSZ + sizeof "appears"],
          disappearbuf[BUFSZ + sizeof "disappears"];
-    boolean oseen, already_discovered = objects[obj->otyp].oc_name_known != 0;
-    int omx, omy, shift = 0, appear = 0, disappear = 0;
+    boolean oseen, nseen,
+            already_discovered = objects[obj->otyp].oc_name_known != 0;
+    int omx, omy, shift = 0, appear = 0, disappear = 0, trapped = 0;
 
     /* need to copy (up to 3) names as they're collected rather than just
        save pointers to them, otherwise churning through every mbuf[] might
@@ -519,7 +520,7 @@ magic_whistled(struct obj *obj)
             fill_pit(mtmp->mx, mtmp->my);
         }
 
-        oseen = canspotmon(mtmp);
+        oseen = canspotmon(mtmp); /* old 'seen' status */
         if (oseen) /* get name in case it's one we'll remember */
             mnam = y_monnam(mtmp); /* before mnexto(); it might disappear */
         /* mimic must be revealed before we know whether it
@@ -528,10 +529,36 @@ magic_whistled(struct obj *obj)
             seemimic(mtmp);
         omx = mtmp->mx, omy = mtmp->my;
         mnexto(mtmp, !already_discovered ? RLOC_MSG : RLOC_NONE);
+
         if (mtmp->mx != omx || mtmp->my != omy) {
             mtmp->mundetected = 0; /* reveal non-mimic hider iff it moved */
+            /*
+             * FIXME:
+             *  All relocated monsters should change positions essentially
+             *  simultaneously but we're dealing with them sequentially.
+             *  That could kill some off in the process, each time leaving
+             *  their target position (which should be occupied at least
+             *  momentarily) available as a potential death trap for others.
+             *
+             *  Also, teleporting onto a trap introduces message sequencing
+             *  issues.  We try to avoid the most obvious non sequiturs by
+             *  checking whether pline() got called during mintrap().
+             *  iflags.last_msg will be changed from the value we set here
+             *  to PLNMSG_UNKNOWN in that situation.
+             */
+            iflags.last_msg = PLNMSG_enum; /* not a specific message */
+            if (mintrap(mtmp, NO_TRAP_FLAGS) == Trap_Killed_Mon)
+                change_luck(-1);
+            if (iflags.last_msg != PLNMSG_enum) {
+                ++trapped;
+                continue;
+            }
+            /* dying while seen would have issued a message and not get here;
+               being sent to an unseen location and dying there should be
+               included in the disappeared case */
+            nseen = DEADMONSTER(mtmp) ? FALSE : canspotmon(mtmp);
 
-            if (canspotmon(mtmp)) {
+            if (nseen) {
                 mnam = y_monnam(mtmp);
                 if (oseen) {
                     if (++shift == 1)
@@ -544,16 +571,6 @@ magic_whistled(struct obj *obj)
                 if (++disappear == 1)
                     Sprintf(disappearbuf, "%s disappears", mnam);
             }
-            /*
-             * FIXME:
-             *  All relocated monsters should change positions essentially
-             *  simultaneously but we're dealing with them sequentially.
-             *  That could kill some off in the process, each time leaving
-             *  their target position (which should be occupied at least
-             *  momentarily) available as a potential death trap for others.
-             */
-            if (mintrap(mtmp, NO_TRAP_FLAGS) == Trap_Killed_Mon)
-                change_luck(-1);
         }
     }
 
@@ -579,7 +596,7 @@ magic_whistled(struct obj *obj)
     if (!already_discovered) {
         /* message(s) were handled by rloc(); if only noticeable change was
            pet(s) disappearing, the magic whistle won't become discovered */
-        if (shift + appear > 0)
+        if (shift + appear + trapped > 0)
             makeknown(obj->otyp);
     } else {
         /* could use array of cardinal number names like wishcmdassist() but
@@ -637,7 +654,7 @@ magic_whistled(struct obj *obj)
 }
 
 boolean
-um_dist(xchar x, xchar y, xchar n)
+um_dist(coordxy x, coordxy y, xint16 n)
 {
     return (boolean) (abs(u.ux - x) > n || abs(u.uy - y) > n);
 }
@@ -872,7 +889,7 @@ next_to_u(void)
 }
 
 void
-check_leash(xchar x, xchar y)
+check_leash(coordxy x, coordxy y)
 {
     register struct obj *otmp;
     register struct monst *mtmp;
@@ -1410,7 +1427,7 @@ snuff_candle(struct obj *otmp)
     if ((candle || otmp->otyp == CANDELABRUM_OF_INVOCATION)
         && otmp->lamplit) {
         char buf[BUFSZ];
-        xchar x, y;
+        coordxy x, y;
         boolean many = candle ? (otmp->quan > 1L) : (otmp->spe > 1);
 
         (void) get_obj_location(otmp, &x, &y, 0);
@@ -1430,7 +1447,7 @@ snuff_candle(struct obj *otmp)
 boolean
 snuff_lit(struct obj *obj)
 {
-    xchar x, y;
+    coordxy x, y;
 
     if (obj->lamplit) {
         if (obj->otyp == OIL_LAMP || obj->otyp == MAGIC_LAMP
@@ -1474,7 +1491,7 @@ splash_lit(struct obj *obj)
                    /* don't assume that lit lantern has been swallowed;
                       a nymph might have stolen it or picked it up */
                    && ((mtmp = obj->ocarry), humanoid(mtmp->data))) {
-            xchar x, y;
+            coordxy x, y;
 
             useeit = get_obj_location(obj, &x, &y, 0) && cansee(x, y);
             uhearit = couldsee(x, y) && distu(x, y) < 5 * 5;
@@ -1508,7 +1525,7 @@ splash_lit(struct obj *obj)
 boolean
 catch_lit(struct obj *obj)
 {
-    xchar x, y;
+    coordxy x, y;
 
     if (!obj->lamplit && ignitable(obj) && get_obj_location(obj, &x, &y, 0)) {
         if (((obj->otyp == MAGIC_LAMP /* spe==0 => no djinni inside */
@@ -1577,7 +1594,11 @@ use_lamp(struct obj *obj)
         return;
     }
     if (obj->cursed && !rn2(2)) {
-        if (!Blind)
+        if ((obj->otyp == OIL_LAMP || obj->otyp == MAGIC_LAMP) && !rn2(3)) {
+            pline_The("lamp spills and covers your %s with oil.",
+                      fingers_or_gloves(TRUE));
+            make_glib((int) (Glib & TIMEOUT) + d(2, 10));
+        } else if (!Blind)
             pline("%s for a moment, then %s.", Tobjnam(obj, "flicker"),
                   otense(obj, "die"));
     } else {
@@ -1752,7 +1773,7 @@ enum jump_trajectory {
 
 /* callback routine for walk_path() */
 static boolean
-check_jump(genericptr arg, int x, int y)
+check_jump(genericptr arg, coordxy x, coordxy y)
 {
     int traj = *(int *) arg;
     struct rm *lev = &levl[x][y];
@@ -1783,7 +1804,7 @@ check_jump(genericptr arg, int x, int y)
 }
 
 static boolean
-is_valid_jump_pos(int x, int y, int magic, boolean showmsg)
+is_valid_jump_pos(coordxy x, coordxy y, int magic, boolean showmsg)
 {
     if (!magic && !(HJumping & ~INTRINSIC) && !EJumping && distu(x, y) != 5) {
         /* The Knight jumping restriction still applies when riding a
@@ -1811,9 +1832,9 @@ is_valid_jump_pos(int x, int y, int magic, boolean showmsg)
            passage through doorways: horizonal, vertical, or diagonal;
            since knight's jump and other irregular directions are
            possible, we flatten those out to simplify door checks */
-        int diag, traj,
-            dx = x - u.ux, dy = y - u.uy,
-            ax = abs(dx), ay = abs(dy);
+        int diag, traj;
+        coordxy dx = x - u.ux, dy = y - u.uy,
+                ax = abs(dx), ay = abs(dy);
 
         /* diag: any non-orthogonal destination classifed as diagonal */
         diag = (magic || Passes_walls || (!dx && !dy)) ? jAny
@@ -1849,7 +1870,7 @@ is_valid_jump_pos(int x, int y, int magic, boolean showmsg)
 }
 
 static boolean
-get_valid_jump_position(int x, int y)
+get_valid_jump_position(coordxy x, coordxy y)
 {
     return (isok(x, y)
             && (ACCESSIBLE(levl[x][y].typ) || Passes_walls)
@@ -1862,12 +1883,12 @@ display_jump_positions(int state)
     if (state == 0) {
         tmp_at(DISP_BEAM, cmap_to_glyph(S_goodpos));
     } else if (state == 1) {
-        int x, y, dx, dy;
+        coordxy x, y, dx, dy;
 
         for (dx = -4; dx <= 4; dx++)
             for (dy = -4; dy <= 4; dy++) {
-                x = dx + (int) u.ux;
-                y = dy + (int) u.uy;
+                x = dx + (coordxy) u.ux;
+                y = dy + (coordxy) u.uy;
                 if (get_valid_jump_position(x, y))
                     tmp_at(x, y);
             }
@@ -2363,7 +2384,7 @@ fig_transform(anything *arg, long timeout)
 static boolean
 figurine_location_checks(struct obj *obj, coord *cc, boolean quietly)
 {
-    xchar x, y;
+    coordxy x, y;
 
     if (carried(obj) && u.uswallow) {
         if (!quietly)
@@ -2397,7 +2418,7 @@ static int
 use_figurine(struct obj **optr)
 {
     register struct obj *obj = *optr;
-    xchar x, y;
+    coordxy x, y;
     coord cc;
 
     if (u.uswallow) {
@@ -2828,8 +2849,7 @@ use_whip(struct obj *obj)
         rx = mtmp->mx;
         ry = mtmp->my;
     } else {
-        if (Stunned || (Confusion && !rn2(5)))
-            confdir();
+        confdir(FALSE);
         rx = u.ux + u.dx;
         ry = u.uy + u.dy;
         if (!isok(rx, ry)) {
@@ -3126,7 +3146,8 @@ find_poleable_mon(coord *pos, int min_range, int max_range)
     struct monst *mtmp;
     coord mpos;
     boolean impaired;
-    int x, y, lo_x, hi_x, lo_y, hi_y, rt, glyph;
+    coordxy x, y, lo_x, hi_x, lo_y, hi_y, rt;
+    int glyph;
 
     impaired = (Confusion || Stunned || Hallucination);
     mpos.x = mpos.y = 0; /* no candidate location yet */
@@ -3145,7 +3166,7 @@ find_poleable_mon(coord *pos, int min_range, int max_range)
                 && (mtmp->mtame || (mtmp->mpeaceful && flags.confirm)))
                 continue;
             if (glyph_is_poleable(glyph)
-                    && (!glyph_is_statue(glyph) || impaired)) {
+                && (!glyph_is_statue(glyph) || impaired)) {
                 if (mpos.x)
                     return FALSE; /* more than one candidate location */
                 mpos.x = x, mpos.y = y;
@@ -3159,7 +3180,7 @@ find_poleable_mon(coord *pos, int min_range, int max_range)
 }
 
 static boolean
-get_valid_polearm_position(int x, int y)
+get_valid_polearm_position(coordxy x, coordxy y)
 {
     int glyph;
 
@@ -3177,7 +3198,7 @@ display_polearm_positions(int state)
     if (state == 0) {
         tmp_at(DISP_BEAM, cmap_to_glyph(S_goodpos));
     } else if (state == 1) {
-        int x, y, dx, dy;
+        coordxy x, y, dx, dy;
 
         for (dx = -4; dx <= 4; dx++)
             for (dy = -4; dy <= 4; dy++) {
@@ -3506,21 +3527,22 @@ use_grapple(struct obj *obj)
         anything any;
         char buf[BUFSZ];
         menu_item *selected;
+        int clr = 0;
 
         any = cg.zeroany; /* set all bits to zero */
         any.a_int = 1; /* use index+1 (cant use 0) as identifier */
         start_menu(tmpwin, MENU_BEHAVE_STANDARD);
         any.a_int++;
         Sprintf(buf, "an object on the %s", surface(cc.x, cc.y));
-        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, buf,
-                 MENU_ITEMFLAGS_NONE);
+        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+                 clr, buf, MENU_ITEMFLAGS_NONE);
         any.a_int++;
         add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                 "a monster", MENU_ITEMFLAGS_NONE);
+                 clr, "a monster", MENU_ITEMFLAGS_NONE);
         any.a_int++;
         Sprintf(buf, "the %s", surface(cc.x, cc.y));
-        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, buf,
-                 MENU_ITEMFLAGS_NONE);
+        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
+                 buf, MENU_ITEMFLAGS_NONE);
         end_menu(tmpwin, "Aim for what?");
         tohit = rn2(4);
         if (select_menu(tmpwin, PICK_ONE, &selected) > 0
@@ -3604,7 +3626,8 @@ static int
 do_break_wand(struct obj *obj)
 {
     static const char nothing_else_happens[] = "But nothing else happens...";
-    register int i, x, y;
+    register int i;
+    coordxy x, y;
     register struct monst *mon;
     int dmg, damage;
     boolean affects_objects;

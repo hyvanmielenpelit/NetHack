@@ -12,8 +12,8 @@ static int disturb(struct monst *);
 static void release_hero(struct monst *);
 static void distfleeck(struct monst *, int *, int *, int *);
 static int m_arrival(struct monst *);
-static boolean holds_up_web(xchar, xchar);
-static int count_webbing_walls(xchar, xchar);
+static boolean holds_up_web(coordxy, coordxy);
+static int count_webbing_walls(coordxy, coordxy);
 static boolean soko_allow_web(struct monst *);
 static boolean leppie_avoidance(struct monst *);
 static void leppie_stash(struct monst *);
@@ -46,6 +46,24 @@ mb_trapped(struct monst *mtmp, boolean canseeit)
     }
     mtmp->mtrapseen |= (1 << (TRAPPED_DOOR - 1));
     return FALSE;
+}
+
+/* push coordinate x,y to mtrack, making monster remember where it was */
+void
+mon_track_add(struct monst *mtmp, coordxy x, coordxy y)
+{
+    int j;
+
+    for (j = MTSZ - 1; j > 0; j--)
+        mtmp->mtrack[j] = mtmp->mtrack[j - 1];
+    mtmp->mtrack[0].x = x;
+    mtmp->mtrack[0].y = y;
+}
+
+void
+mon_track_clear(struct monst *mtmp)
+{
+    memset(mtmp->mtrack, 0, sizeof(mtmp->mtrack));
 }
 
 /* check whether a monster is carrying a locking/unlocking tool */
@@ -85,7 +103,7 @@ mon_yells(struct monst* mon, const char* shout)
 static void
 watch_on_duty(register struct monst* mtmp)
 {
-    int x, y;
+    coordxy x, y;
 
     if (mtmp->mpeaceful && in_town(u.ux + u.dx, u.uy + u.dy)
         && mtmp->mcansee && m_canseeu(mtmp) && !rn2(3)) {
@@ -118,7 +136,7 @@ dochugw(
                    * so perform stop-what-you're-doing-if-close-enough-
                    * to-be-a-threat check but don't move mtmp */
 {
-    int x = mtmp->mx, y = mtmp->my; /* 'mtmp's location before dochug() */
+    coordxy x = mtmp->mx, y = mtmp->my; /* 'mtmp's location before dochug() */
     /* skip canspotmon() if occupation is Null */
     boolean already_saw_mon = (chug && g.occupation) ? canspotmon(mtmp) : 0;
     int rd = chug ? dochug(mtmp) : 0;
@@ -148,7 +166,7 @@ dochugw(
 }
 
 boolean
-onscary(int x, int y, struct monst* mtmp)
+onscary(coordxy x, coordxy y, struct monst* mtmp)
 {
     /* creatures who are directly resistant to magical scaring:
      * humans aren't monsters
@@ -394,7 +412,7 @@ monflee(
         mtmp->mflee = 1;
     }
     /* ignore recently-stepped spaces when made to flee */
-    memset(mtmp->mtrack, 0, sizeof(mtmp->mtrack));
+    mon_track_clear(mtmp);
 }
 
 static void
@@ -455,6 +473,7 @@ dochug(register struct monst* mtmp)
     register int tmp = MMOVE_NOTHING;
     int inrange, nearby, scared, res;
     struct obj *otmp;
+    boolean panicattk = FALSE;
 
     /*  Pre-movement adjustments
      */
@@ -702,7 +721,7 @@ dochug(register struct monst* mtmp)
             for (a = &mdat->mattk[0]; a < &mdat->mattk[NATTK]; a++) {
                 if (a->aatyp == AT_MAGC
                     && (a->adtyp == AD_SPEL || a->adtyp == AD_CLRC)) {
-                    if (castmu(mtmp, a, FALSE, FALSE)) {
+                    if ((castmu(mtmp, a, FALSE, FALSE) & MM_HIT)) {
                         tmp = MMOVE_DONE; /* bypass m_move() */
                         break;
                     }
@@ -716,6 +735,10 @@ dochug(register struct monst* mtmp)
             distfleeck(mtmp, &inrange, &nearby, &scared); /* recalc */
 
         switch (tmp) { /* for pets, cases 0 and 3 are equivalent */
+        case MMOVE_NOMOVES:
+            if (scared)
+                panicattk = TRUE;
+            /*FALLTHRU*/
         case MMOVE_NOTHING: /* no movement, but it can still attack you */
         case MMOVE_DONE: /* absolutely no movement */
             /* vault guard might have vanished */
@@ -757,7 +780,7 @@ dochug(register struct monst* mtmp)
 
     if (tmp != MMOVE_DONE && (!mtmp->mpeaceful
                      || (Conflict && !resist_conflict(mtmp)))) {
-        if (inrange && !scared && !noattacks(mdat)
+        if (((inrange && !scared) || panicattk) && !noattacks(mdat)
             /* [is this hp check really needed?] */
             && (Upolyd ? u.mh : u.uhp) > 0) {
             if (mattacku(mtmp))
@@ -812,8 +835,8 @@ should_displace(
     coord *poss, /* coord poss[9] */
     long *info,  /* long info[9] */
     int cnt,
-    xchar gx,
-    xchar gy)
+    coordxy gx,
+    coordxy gy)
 {
     int shortest_with_displacing = -1;
     int shortest_without_displacing = -1;
@@ -845,7 +868,7 @@ should_displace(
 }
 
 boolean
-m_digweapon_check(struct monst* mtmp, xchar nix, xchar niy)
+m_digweapon_check(struct monst* mtmp, coordxy nix, coordxy niy)
 {
     boolean can_tunnel = 0;
     struct obj *mw_tmp = MON_WEP(mtmp);
@@ -940,7 +963,7 @@ m_balks_at_approaching(struct monst* mtmp)
 }
 
 static boolean
-holds_up_web(xchar x, xchar y)
+holds_up_web(coordxy x, coordxy y)
 {
     stairway *sway;
 
@@ -957,7 +980,7 @@ holds_up_web(xchar x, xchar y)
 /* returns the number of walls in the four cardinal directions that could
    hold up a web */
 static int
-count_webbing_walls(xchar x, xchar y)
+count_webbing_walls(coordxy x, coordxy y)
 {
     return (holds_up_web(x, y - 1) + holds_up_web(x + 1, y)
             + holds_up_web(x, y + 1) + holds_up_web(x - 1, y));
@@ -1018,7 +1041,8 @@ int
 m_move(register struct monst* mtmp, register int after)
 {
     int appr, etmp;
-    xchar gx, gy, nix, niy, chcnt;
+    coordxy gx, gy, nix, niy;
+    xint16 chcnt;
     int chi; /* could be schar except for stupid Sun-2 compiler */
     boolean likegold = 0, likegems = 0, likeobjs = 0, likemagic = 0,
             conceals = 0;
@@ -1076,7 +1100,7 @@ m_move(register struct monst* mtmp, register int after)
 
     /* and the acquisitive monsters get special treatment */
     if (is_covetous(ptr)) {
-        xchar tx = STRAT_GOALX(mtmp->mstrategy),
+        coordxy tx = STRAT_GOALX(mtmp->mstrategy),
               ty = STRAT_GOALY(mtmp->mstrategy);
         struct monst *intruder = m_at(tx, ty);
         /*
@@ -1199,8 +1223,8 @@ m_move(register struct monst* mtmp, register int after)
     {
         register int minr = SQSRCHRADIUS; /* not too far away */
         register struct obj *otmp;
-        register int xx, yy;
-        int oomx, oomy, lmx, lmy;
+        register coordxy xx, yy;
+        coordxy oomx, oomy, lmx, lmy;
 
         /* cut down the search radius if it thinks character is closer. */
         if (distmin(mtmp->mux, mtmp->muy, omx, omy) < SQSRCHRADIUS
@@ -1323,6 +1347,8 @@ m_move(register struct monst* mtmp, register int after)
         coord poss[9];
 
         cnt = mfndpos(mtmp, poss, info, flag);
+        if (cnt == 0)
+            return MMOVE_NOMOVES;
         chcnt = 0;
         jcnt = min(MTSZ, cnt - 1);
         chi = -1;
@@ -1359,7 +1385,7 @@ m_move(register struct monst* mtmp, register int after)
             nearer = ((ndist = dist2(nx, ny, gx, gy)) < nidist);
 
             if ((appr == 1 && nearer) || (appr == -1 && !nearer)
-                || (!appr && !rn2(++chcnt)) || !mmoved) {
+                || (!appr && !rn2(++chcnt)) || (mmoved == MMOVE_NOTHING)) {
                 nix = nx;
                 niy = ny;
                 nidist = ndist;
@@ -1371,9 +1397,7 @@ m_move(register struct monst* mtmp, register int after)
         }
     }
 
-    if (mmoved) {
-        register int j;
-
+    if (mmoved != MMOVE_NOTHING) {
         if (mmoved == MMOVE_MOVED && (u.ux != nix || u.uy != niy) && itsstuck(mtmp))
             return MMOVE_DONE;
 
@@ -1438,10 +1462,7 @@ m_move(register struct monst* mtmp, register int after)
 
         maybe_unhide_at(mtmp->mx, mtmp->my);
 
-        for (j = MTSZ - 1; j > 0; j--)
-            mtmp->mtrack[j] = mtmp->mtrack[j - 1];
-        mtmp->mtrack[0].x = omx;
-        mtmp->mtrack[0].y = omy;
+        mon_track_add(mtmp, omx, omy);
     } else {
         if (is_unicorn(ptr) && rn2(2) && !tele_restrict(mtmp)) {
             (void) rloc(mtmp, RLOC_MSG);
@@ -1723,7 +1744,7 @@ m_move(register struct monst* mtmp, register int after)
  * (mtmp died) or 3 (mtmp made its move).
  */
 int
-m_move_aggress(struct monst* mtmp, xchar x, xchar y)
+m_move_aggress(struct monst* mtmp, coordxy x, coordxy y)
 {
     struct monst *mtmp2;
     int mstatus;
@@ -1749,7 +1770,7 @@ m_move_aggress(struct monst* mtmp, xchar x, xchar y)
 }
 
 void
-dissolve_bars(register int x, register int y)
+dissolve_bars(coordxy x, coordxy y)
 {
     levl[x][y].typ = (Is_special(&u.uz) || *in_rooms(x, y, 0)) ? ROOM : CORR;
     levl[x][y].flags = 0;
@@ -1759,14 +1780,14 @@ dissolve_bars(register int x, register int y)
 }
 
 boolean
-closed_door(register int x, register int y)
+closed_door(coordxy x, coordxy y)
 {
     return (boolean) (IS_DOOR(levl[x][y].typ)
                       && (levl[x][y].doormask & (D_LOCKED | D_CLOSED)));
 }
 
 boolean
-accessible(register int x, register int y)
+accessible(coordxy x, coordxy y)
 {
     int levtyp = levl[x][y].typ;
 
@@ -1782,7 +1803,8 @@ void
 set_apparxy(register struct monst* mtmp)
 {
     boolean notseen, notthere, gotu;
-    int disp, mx = mtmp->mux, my = mtmp->muy;
+    int disp;
+    coordxy mx = mtmp->mux, my = mtmp->muy;
     long umoney = money_cnt(g.invent);
 
     /*
@@ -1855,8 +1877,8 @@ set_apparxy(register struct monst* mtmp)
 boolean
 undesirable_disp(
     struct monst *mtmp, /* barging creature */
-    xchar x,
-    xchar y) /* spot 'mtmp' is considering moving to */
+    coordxy x,
+    coordxy y) /* spot 'mtmp' is considering moving to */
 {
     boolean is_pet = (mtmp && mtmp->mtame && !mtmp->isminion);
     struct trap *trap = t_at(x, y);

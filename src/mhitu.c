@@ -653,7 +653,7 @@ mattacku(register struct monst *mtmp)
         if (i > 0 && foundyou /* previous attack might have moved hero */
             && (mtmp->mux != u.ux || mtmp->muy != u.uy))
             continue; /* fill in sum[] with 'miss' but skip other actions */
-        mon_currwep = (struct obj *)0;
+        mon_currwep = (struct obj *) 0;
         mattk = getmattk(mtmp, &g.youmonst, i, sum, &alt_attk);
         if ((u.uswallow && mattk->aatyp != AT_ENGL)
             || (skipnonmagc && mattk->aatyp != AT_MAGC)
@@ -1032,6 +1032,9 @@ hitmu(register struct monst *mtmp, register struct attack *mattk)
         mhm.damage += d((int) mattk->damn, (int) mattk->damd); /* extra dmg */
 
     mhitm_adtyping(mtmp, mattk, &g.youmonst, &mhm);
+
+    (void) mhitm_knockback(mtmp, &g.youmonst, mattk, &mhm.hitflags, (MON_WEP(mtmp) != 0));
+
     if (mhm.done)
         return mhm.hitflags;
 
@@ -1702,7 +1705,7 @@ could_seduce(struct monst *magr, struct monst *mdef,
 {
     struct permonst *pagr;
     boolean agrinvis, defperc;
-    xchar genagr, gendef;
+    xint16 genagr, gendef;
     int adtyp;
 
     if (is_animal(magr->data))

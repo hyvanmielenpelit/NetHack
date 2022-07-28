@@ -11,7 +11,7 @@
 /* worm segment structure */
 struct wseg {
     struct wseg *nseg;
-    xchar wx, wy; /* the segment's position */
+    coordxy wx, wy; /* the segment's position */
 };
 
 static void toss_wsegs(struct wseg *, boolean);
@@ -368,7 +368,7 @@ wormhitu(struct monst *worm)
  *  that both halves will survive.
  */
 void
-cutworm(struct monst *worm, xchar x, xchar y,
+cutworm(struct monst *worm, coordxy x, coordxy y,
         boolean cuttier) /* hit is by wielded blade or axe or by thrown axe */
 {
     struct wseg *curr, *new_tail;
@@ -621,7 +621,7 @@ place_wsegs(struct monst *worm, struct monst *oldworm)
     struct wseg *curr = wtails[worm->wormno];
 
     while (curr != wheads[worm->wormno]) {
-        xchar x = curr->wx, y = curr->wy;
+        coordxy x = curr->wx, y = curr->wy;
         struct monst *mtmp = m_at(x, y);
 
         if (oldworm && mtmp == oldworm)
@@ -739,7 +739,7 @@ remove_worm(struct monst *worm)
  *  be, if somehow the head is disjoint from the tail.
  */
 void
-place_worm_tail_randomly(struct monst *worm, xchar x, xchar y)
+place_worm_tail_randomly(struct monst *worm, coordxy x, coordxy y)
 {
     int wnum = worm->wormno;
     struct wseg *curr = wtails[wnum];
@@ -776,42 +776,12 @@ place_worm_tail_randomly(struct monst *worm, xchar x, xchar y)
     new_tail->wy = y;
 
     while (curr) {
-        int nx = 0, ny = 0;
-#if 0   /* old code */
-        int trycnt = 0;
+        coordxy nx = ox, ny = oy;
 
-        /* pick a random direction from x, y and test for goodpos() */
-        do {
-            random_dir(ox, oy, &nx, &ny);
-        } while (!goodpos(nx, ny, worm, 0) && ++tryct <= 50);
-
-        if (tryct <= 50)
-#else   /* new code */
-        int i, j, k, dirs[N_DIRS];
-
-        /* instead of picking a random direction up to 50 times, try each
-           of the eight directions at most once after shuffling their order */
-        for (i = 0; i < N_DIRS; ++i)
-            dirs[i] = i;
-        for (i = N_DIRS; i > 0; --i) {
-            j = rn2(i);
-            k = dirs[j];
-            dirs[j] = dirs[i - 1];
-            dirs[i - 1] = k;
-        }
-        for (i = 0; i < N_DIRS; ++i) {
-            nx = ox + xdir[dirs[i]];
-            ny = oy + ydir[dirs[i]];
-            if (goodpos(nx, ny, worm, 0)) /* includes an isok() check */
-                break;
-        }
-
-        if (i < N_DIRS)
-#endif
-        {
+        if (rnd_nextto_goodpos(&nx, &ny, worm)) {
             place_worm_seg(worm, nx, ny);
-            curr->wx = (xchar) (ox = nx);
-            curr->wy = (xchar) (oy = ny);
+            curr->wx = (coordxy) (ox = nx);
+            curr->wy = (coordxy) (oy = ny);
             wtails[wnum] = curr;
             curr = curr->nseg;
             wtails[wnum]->nseg = new_tail;
@@ -985,7 +955,7 @@ wseg_at(struct monst *worm, int x, int y)
     if (worm && worm->wormno && m_at(x, y) == worm) {
         struct wseg *curr;
         int i, n;
-        xchar wx = (xchar) x, wy = (xchar) y;
+        coordxy wx = (coordxy) x, wy = (coordxy) y;
 
         for (i = 0, curr = wtails[worm->wormno]; curr; curr = curr->nseg) {
             if (curr->wx == wx && curr->wy == wy)

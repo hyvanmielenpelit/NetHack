@@ -5,6 +5,7 @@
 /* main.c - Windows */
 
 #include "win32api.h" /* for GetModuleFileName */
+
 #include "hack.h"
 #ifdef DLB
 #include "dlb.h"
@@ -35,6 +36,9 @@ extern void backsp(void);
 #endif
 extern void clear_screen(void);
 
+#ifdef update_file
+#undef update_file
+#endif
 #if defined(TERMLIB) || defined(CURSES_GRAPHICS)
 extern void (*decgraphics_mode_callback)(void);
 #endif
@@ -423,6 +427,11 @@ mingw_main(int argc, char *argv[])
     char *windowtype = NULL;
     char fnamebuf[BUFSZ], encodedfnamebuf[BUFSZ];
     char failbuf[BUFSZ];
+    int getlock_result = 0;
+
+#ifdef _MSC_VER
+    _CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
+#endif
 
     /*
      * Get a set of valid safe windowport function
@@ -541,14 +550,14 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
 
     nethack_enter(argc, argv);
     iflags.use_background_glyph = FALSE;
-    if (WINDOWPORT("mswin"))
+    if (WINDOWPORT(mswin))
         iflags.use_background_glyph = TRUE;
-    if (WINDOWPORT("tty"))
+    if (WINDOWPORT(tty))
         consoletty_open(1);
 
     init_nhwindows(&argc, argv);
 
-    if (WINDOWPORT("tty"))
+    if (WINDOWPORT(tty))
         toggle_mouse_support();
 
     if (g.symset[PRIMARYSET].handling
@@ -569,7 +578,7 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
 #endif     /* TERMLIB || CURSES */
 #if 0
 #ifdef CURSES_GRAPHICS
-    if (WINDOWPORT("curses"))
+    if (WINDOWPORT(curses))
         (*cursesgraphics_mode_callback)();
 #endif
 #endif
@@ -594,9 +603,12 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
         fnamebuf, encodedfnamebuf, BUFSZ);
     Sprintf(g.lock, "%s", encodedfnamebuf);
     /* regularize(lock); */ /* we encode now, rather than substitute */
-    if (getlock() == 0)
+    if ((getlock_result = getlock()) == 0)
         nethack_exit(EXIT_SUCCESS);
 
+    if (getlock_result < 0) {
+        set_savefile_name(TRUE);
+    }
     /* Set up level 0 file to keep the game state.
      */
     nhfp = create_levelfile(0, (char *) 0);
@@ -618,7 +630,7 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
      * We'll return here if new game player_selection() renames the hero.
      */
 attempt_restore:
-    if ((nhfp = restore_saved_game()) != 0) {
+    if ((getlock_result != -1) && (nhfp = restore_saved_game()) != 0) {
 #ifdef NEWS
         if (iflags.news) {
             display_file(NEWS, FALSE);
@@ -893,7 +905,7 @@ safe_routines(void)
      * Get a set of valid safe windowport function
      * pointers during early startup initialization.
      */
-    if (!WINDOWPORT("safe-startup"))
+    if (!WINDOWPORT(safestartup))
         windowprocs = *get_safe_procs(1);
     if (!GUILaunched)
         windowprocs.win_nhgetch = windows_console_custom_nhgetch;
@@ -1140,7 +1152,7 @@ eraseoldlocks(void)
 int
 getlock(void)
 {
-    int fd, ern = 0, prompt_result = 0;
+    int fd, ern = 0, prompt_result = 1;
     int fcmask = FCMASK;
 #ifndef SELF_RECOVER
     char tbuf[BUFSZ];
@@ -1148,7 +1160,7 @@ getlock(void)
     const char *fq_lock;
 #define OOPS_BUFSZ 512
     char oops[OOPS_BUFSZ];
-    boolean istty = WINDOWPORT("tty");
+    boolean istty = WINDOWPORT(tty);
 
     /* we ignore QUIT and INT at this point */
     if (!lock_file(HLOCK, LOCKPREFIX, 10)) {
@@ -1179,7 +1191,7 @@ getlock(void)
 
     (void) nhclose(fd);
 
-    if (WINDOWPORT("tty"))
+    if (WINDOWPORT(tty))
         prompt_result = tty_self_recover_prompt();
     else
         prompt_result = other_self_recover_prompt();
@@ -1260,7 +1272,7 @@ gotlock:
             error("cannot close lock (%s)", fq_lock);
         }
     }
-    return 1;
+    return prompt_result;
 }
 #endif /* PC_LOCKING */
 
@@ -1316,7 +1328,7 @@ tty_self_recover_prompt(void)
     c = 'n';
     ct = 0;
     saved_procs = windowprocs;
-    if (!WINDOWPORT("safe-startup"))
+    if (!WINDOWPORT(safestartup))
         windowprocs = *get_safe_procs(2); /* arg 2 uses no-newline variant */
     windowprocs.win_nhgetch = windows_console_custom_nhgetch;
     raw_print("\n");
@@ -1376,13 +1388,13 @@ int
 other_self_recover_prompt(void)
 {
     register int c, ci, ct, pl, retval = 0;
-    boolean ismswin = WINDOWPORT("mswin"),
-            iscurses = WINDOWPORT("curses");
+    boolean ismswin = WINDOWPORT(mswin),
+            iscurses = WINDOWPORT(curses);
 
     pl = 1;
     c = 'n';
     ct = 0;
-    if (iflags.window_inited || WINDOWPORT("curses")) {
+    if (iflags.window_inited || WINDOWPORT(curses)) {
         c = yn("There are files from a game in progress under your name. "
                "Recover?");
     } else {

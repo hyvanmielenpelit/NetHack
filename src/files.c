@@ -1361,7 +1361,7 @@ docompress_file(const char *filename, boolean uncomp)
     int f;
     unsigned ln;
 #ifdef TTY_GRAPHICS
-    boolean istty = WINDOWPORT("tty");
+    boolean istty = WINDOWPORT(tty);
 #endif
 
 #ifdef COMPRESS_EXTENSION
@@ -2937,15 +2937,21 @@ void
 config_erradd(const char *buf)
 {
     char lineno[QBUFSZ];
+    const char *punct;
 
     if (!buf || !*buf)
         buf = "Unknown error";
 
+    /* if buf[] doesn't end in a period, exclamation point, or question mark,
+       we'll include a period (in the message, not appended to buf[]) */
+    punct = eos((char *) buf) - 1; /* eos(buf)-1 is valid; cast away const */
+    punct = index(".!?", *punct) ? "" : ".";
+
     if (!g.program_state.config_error_ready) {
         /* either very early, where pline() will use raw_print(), or
            player gave bad value when prompted by interactive 'O' command */
-        pline("%s%s.", !iflags.window_inited ? "config_error_add: " : "",
-              buf);
+        pline("%s%s%s", !iflags.window_inited ? "config_error_add: " : "",
+              buf, punct);
         wait_synch();
         return;
     }
@@ -2971,8 +2977,8 @@ config_erradd(const char *buf)
     } else
         lineno[0] = '\0';
 
-    pline("%s %s%s.", config_error_data->secure ? "Error:" : " *",
-          lineno, buf);
+    pline("%s %s%s%s", config_error_data->secure ? "Error:" : " *",
+          lineno, buf, punct);
 }
 
 int
@@ -3681,7 +3687,7 @@ recover_savefile(void)
 {
     NHFILE *gnhfp, *lnhfp, *snhfp;
     int lev, savelev, hpid, pltmpsiz, filecmc;
-    xchar levc;
+    xint16 levc;
     struct version_info version_data;
     int processed[256];
     char savename[SAVESIZE], errbuf[BUFSZ], indicator;
@@ -3820,14 +3826,14 @@ recover_savefile(void)
     processed[0] = 1;
 
     for (lev = 1; lev < 256; lev++) {
-        /* level numbers are kept in xchars in save.c, so the
+        /* level numbers are kept in xint16s in save.c, so the
          * maximum level number (for the endlevel) must be < 256
          */
         if (lev != savelev) {
             lnhfp = open_levelfile(lev, (char *) 0);
             if (lnhfp) {
                 /* any or all of these may not exist */
-                levc = (xchar) lev;
+                levc = (xint16) lev;
                 write(snhfp->fd, (genericptr_t) &levc, sizeof(levc));
                 if (!copy_bytes(lnhfp->fd, snhfp->fd)) {
                     close_nhfile(lnhfp);
@@ -4257,14 +4263,14 @@ choose_passage(int passagecnt, /* total of available passages */
             /* collect all of the N indices */
             g.context.novel.count = passagecnt;
             for (idx = 0; idx < MAXPASSAGES; idx++)
-                g.context.novel.pasg[idx] = (xchar) ((idx < passagecnt)
+                g.context.novel.pasg[idx] = (xint16) ((idx < passagecnt)
                                                    ? idx + 1 : 0);
         } else {
             /* collect MAXPASSAGES of the N indices */
             g.context.novel.count = MAXPASSAGES;
             for (idx = i = 0; i < passagecnt; ++i, --range)
                 if (range > 0 && rn2(range) < limit) {
-                    g.context.novel.pasg[idx++] = (xchar) (i + 1);
+                    g.context.novel.pasg[idx++] = (xint16) (i + 1);
                     --limit;
                 }
         }

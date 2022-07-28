@@ -35,12 +35,15 @@ static void skill_advance(int);
 #define PN_MATTER_SPELL (-14)
 
 static NEARDATA const short skill_names_indices[P_NUM_SKILLS] = {
+    /* Weapon */
     0, DAGGER, KNIFE, AXE, PICK_AXE, SHORT_SWORD, BROADSWORD, LONG_SWORD,
-    TWO_HANDED_SWORD, SCIMITAR, PN_SABER, CLUB, MACE, MORNING_STAR, FLAIL,
-    PN_HAMMER, QUARTERSTAFF, PN_POLEARMS, SPEAR, TRIDENT, LANCE, BOW, SLING,
-    CROSSBOW, DART, SHURIKEN, BOOMERANG, PN_WHIP, UNICORN_HORN,
+    TWO_HANDED_SWORD, PN_SABER, CLUB, MACE, MORNING_STAR, FLAIL, PN_HAMMER,
+    QUARTERSTAFF, PN_POLEARMS, SPEAR, TRIDENT, LANCE, BOW, SLING, CROSSBOW,
+    DART, SHURIKEN, BOOMERANG, PN_WHIP, UNICORN_HORN,
+    /* Spell */
     PN_ATTACK_SPELL, PN_HEALING_SPELL, PN_DIVINATION_SPELL,
     PN_ENCHANTMENT_SPELL, PN_CLERIC_SPELL, PN_ESCAPE_SPELL, PN_MATTER_SPELL,
+    /* Other */
     PN_BARE_HANDED, PN_TWO_WEAPONS, PN_RIDING
 };
 
@@ -1161,6 +1164,7 @@ enhance_weapon_skill(void)
     anything any;
     winid win;
     boolean speedy = FALSE;
+    int clr = 0;
 
     /* player knows about #enhance, don't show tip anymore */
     g.context.enhance_tip = TRUE;
@@ -1198,17 +1202,17 @@ enhance_weapon_skill(void)
                             ? "when you're more experienced"
                             : "if skill slots become available");
                 add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                         ATR_NONE, buf, MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
             }
             if (maxxed_cnt > 0) {
                 Sprintf(buf,
                  "(Skill%s flagged by \"#\" cannot be enhanced any further.)",
                         plur(maxxed_cnt));
                 add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                         ATR_NONE, buf, MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
             }
             add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                     ATR_NONE, "", MENU_ITEMFLAGS_NONE);
+                     ATR_NONE, clr, "", MENU_ITEMFLAGS_NONE);
         }
 
         /* List the skills, making ones that could be advanced
@@ -1222,7 +1226,7 @@ enhance_weapon_skill(void)
                 any = cg.zeroany;
                 if (i == skill_ranges[pass].first)
                     add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                             iflags.menu_headings,
+                             iflags.menu_headings, clr,
                              skill_ranges[pass].name, MENU_ITEMFLAGS_NONE);
 
                 if (P_RESTRICTED(i))
@@ -1265,7 +1269,7 @@ enhance_weapon_skill(void)
                 }
                 any.a_int = can_advance(i, speedy) ? i + 1 : 0;
                 add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                         ATR_NONE, buf, MENU_ITEMFLAGS_NONE);
+                         ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
             }
 
         Strcpy(buf, (to_advance > 0) ? "Pick a skill to advance:"

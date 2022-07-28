@@ -1,4 +1,4 @@
-/* NetHack 3.7	timeout.c	$NHDT-Date: 1653507043 2022/05/25 19:30:43 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.139 $ */
+/* NetHack 3.7	timeout.c	$NHDT-Date: 1658390077 2022/07/21 07:54:37 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.142 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2018. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -899,7 +899,7 @@ hatch_egg(anything *arg, long timeout)
     struct obj *egg;
     struct monst *mon, *mon2;
     coord cc;
-    xchar x, y;
+    coordxy x, y;
     boolean yours, silent, knows_egg = FALSE;
     boolean cansee_hatchspot = FALSE;
     int i, mnum, hatchcount = 0;
@@ -1222,7 +1222,7 @@ burn_object(anything *arg, long timeout)
 {
     struct obj *obj = arg->a_obj;
     boolean canseeit, many, menorah, need_newsym, need_invupdate;
-    xchar x, y;
+    coordxy x, y;
     char whose[BUFSZ];
 
     menorah = obj->otyp == CANDELABRUM_OF_INVOCATION;
@@ -1240,12 +1240,18 @@ burn_object(anything *arg, long timeout)
                 obj->spe = 0; /* no more candles */
                 obj->owt = weight(obj);
             } else if (Is_candle(obj) || obj->otyp == POT_OIL) {
+                struct monst *mtmp = NULL;
+
+                if (obj->where == OBJ_FLOOR)
+                    mtmp = m_at(obj->ox, obj->oy);
                 /* get rid of candles and burning oil potions;
                    we know this object isn't carried by hero,
                    nor is it migrating */
                 obj_extract_self(obj);
                 obfree(obj, (struct obj *) 0);
                 obj = (struct obj *) 0;
+                if (mtmp)
+                    maybe_unhide_at(mtmp->mx, mtmp->my);
             }
 
         } else {
@@ -1462,11 +1468,15 @@ burn_object(anything *arg, long timeout)
                 if (carried(obj)) {
                     useupall(obj);
                 } else {
+                    boolean onfloor = (obj->where == OBJ_FLOOR);
+
                     /* clear migrating obj's destination code
                        so obfree won't think this item is worn */
                     if (obj->where == OBJ_MIGRATING)
                         obj->owornmask = 0L;
                     obj_extract_self(obj);
+                    if (onfloor)
+                        maybe_unhide_at(x, y);
                     obfree(obj, (struct obj *) 0);
                 }
                 obj = (struct obj *) 0;
@@ -1604,7 +1614,7 @@ begin_burn(struct obj *obj, boolean already_lit)
     }
 
     if (obj->lamplit && !already_lit) {
-        xchar x, y;
+        coordxy x, y;
 
         if (get_obj_location(obj, &x, &y, CONTAINED_TOO | BURIED_TOO))
             new_light_source(x, y, radius, LS_OBJECT, obj_to_any(obj));
@@ -1903,6 +1913,18 @@ wiz_timeout_queue(void)
             }
         }
     }
+    if (u.uswldtim) {
+        putstr(win, 0, "");
+        /* decremented when engulfer makes a move, so can last longer than
+           the number of turns reported if engulfer is slow */
+        Sprintf(buf, "Swallow countdown is %u.", u.uswldtim);
+        putstr(win, 0, buf);
+    }
+    if (u.uinvault) {
+        putstr(win, 0, "");
+        Sprintf(buf, "Vault counter is %d.", u.uinvault);
+        putstr(win, 0, buf);
+    }
     display_nhwindow(win, FALSE);
     destroy_nhwindow(win);
 
@@ -1925,8 +1947,8 @@ timer_sanity_check(void)
             }
         } else if (curr->kind == TIMER_LEVEL) {
             long where = curr->arg.a_long;
-            xchar x = (xchar) ((where >> 16) & 0xFFFF),
-                  y = (xchar) (where & 0xFFFF);
+            coordxy x = (coordxy) ((where >> 16) & 0xFFFF),
+                  y = (coordxy) (where & 0xFFFF);
 
             if (!isok(x, y)) {
                 impossible("timer sanity: spot timer %lu at <%d,%d>",
@@ -2135,7 +2157,7 @@ obj_has_timer(struct obj* object, short timer_type)
  *
  */
 void
-spot_stop_timers(xchar x, xchar y, short func_index)
+spot_stop_timers(coordxy x, coordxy y, short func_index)
 {
     timeout_proc cleanup_func;
     timer_element *curr, *prev, *next_timer = 0;
@@ -2163,7 +2185,7 @@ spot_stop_timers(xchar x, xchar y, short func_index)
  * Returns 0L if no such timer.
  */
 long
-spot_time_expires(xchar x, xchar y, short func_index)
+spot_time_expires(coordxy x, coordxy y, short func_index)
 {
     timer_element *curr;
     long where = (((long) x << 16) | ((long) y));
@@ -2177,7 +2199,7 @@ spot_time_expires(xchar x, xchar y, short func_index)
 }
 
 long
-spot_time_left(xchar x, xchar y, short func_index)
+spot_time_left(coordxy x, coordxy y, short func_index)
 {
     long expires = spot_time_expires(x, y, func_index);
     return (expires > 0L) ? expires - g.moves : 0L;

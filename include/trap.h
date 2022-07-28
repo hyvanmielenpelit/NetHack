@@ -17,8 +17,8 @@ union vlaunchinfo {
 
 struct trap {
     struct trap *ntrap;
-    xchar tx, ty;
-    d_level dst; /* destination for portals */
+    coordxy tx, ty;
+    d_level dst; /* destination for portals/holes/trapdoors */
     coord launch;
     Bitfield(ttyp, 5);
     Bitfield(tseen, 1);
@@ -101,6 +101,7 @@ enum { Trap_Effect_Finished = 0,
 
 #define is_pit(ttyp) ((ttyp) == PIT || (ttyp) == SPIKED_PIT)
 #define is_hole(ttyp)  ((ttyp) == HOLE || (ttyp) == TRAPDOOR)
+#define unhideable_trap(ttyp) ((ttyp) == HOLE) /* visible traps */
 #define undestroyable_trap(ttyp) ((ttyp) == MAGIC_PORTAL         \
                                   || (ttyp) == VIBRATING_SQUARE)
 #define is_magical_trap(ttyp) ((ttyp) == TELEP_TRAP     \

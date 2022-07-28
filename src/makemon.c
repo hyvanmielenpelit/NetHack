@@ -18,7 +18,7 @@ static boolean uncommon(int);
 static int align_shift(struct permonst *);
 static boolean mk_gen_ok(int, unsigned, unsigned);
 static boolean wrong_elem_type(struct permonst *);
-static void m_initgrp(struct monst *, int, int, int, mmflags_nht);
+static void m_initgrp(struct monst *, coordxy, coordxy, int, mmflags_nht);
 static void m_initthrow(struct monst *, int, int);
 static void m_initweap(struct monst *);
 static void m_initinv(struct monst *);
@@ -71,7 +71,7 @@ wrong_elem_type(struct permonst *ptr)
 
 /* make a group just like mtmp */
 static void
-m_initgrp(struct monst *mtmp, int x, int y, int n, mmflags_nht mmflags)
+m_initgrp(struct monst *mtmp, coordxy x, coordxy y, int n, mmflags_nht mmflags)
 {
     coord mm;
     register int cnt = rnd(n);
@@ -815,7 +815,7 @@ m_initinv(register struct monst *mtmp)
 /* Note: for long worms, always call cutworm (cutworm calls clone_mon) */
 struct monst *
 clone_mon(struct monst *mon,
-          xchar x, xchar y) /* clone's preferred location or 0 (near mon) */
+          coordxy x, coordxy y) /* clone's preferred location or 0 (near mon) */
 {
     coord mm;
     struct monst *m2;
@@ -871,7 +871,7 @@ clone_mon(struct monst *mon,
     /* ms->isminion handled below */
 
     /* clone shouldn't be reluctant to move on spots 'parent' just moved on */
-    (void) memset((genericptr_t) m2->mtrack, 0, sizeof m2->mtrack);
+    mon_track_clear(m2);
 
     place_monster(m2, m2->mx, m2->my);
     if (emits_light(m2->data))
@@ -1054,7 +1054,7 @@ makemon_rnd_goodpos(
     coord *cc) /* output */
 {
     int tryct = 0;
-    int nx, ny;
+    coordxy nx, ny;
     boolean good;
 
     do {
@@ -1068,9 +1068,9 @@ makemon_rnd_goodpos(
         /* else go through all map positions, twice, first round
            ignoring positions in sight, and pick first good one.
            skip first round if we're in special level loader or blind */
-        int xofs = nx;
-        int yofs = ny;
-        int dx,dy;
+        coordxy xofs = nx;
+        coordxy yofs = ny;
+        coordxy dx,dy;
         int bl = (g.in_mklev || Blind) ? 1 : 0;
 
         for ( ; bl < 2; bl++) {
@@ -1120,7 +1120,7 @@ makemon_rnd_goodpos(
 struct monst *
 makemon(
     struct permonst *ptr,
-    int x, int y,
+    coordxy x, coordxy y,
     mmflags_nht mmflags)
 {
     register struct monst *mtmp;
@@ -1363,6 +1363,8 @@ makemon(
                      || uwep->oartifact == ART_DEMONBANE))
             mtmp->mpeaceful = mtmp->mtame = FALSE;
     }
+    if (mndx == PM_RAVEN && uwep && uwep->otyp == BEC_DE_CORBIN)
+        mtmp->mpeaceful = TRUE;
     if (mndx == PM_LONG_WORM && (mtmp->wormno = get_wormno()) != 0) {
         initworm(mtmp, allowtail ? rn2(5) : 0);
         if (count_wsegs(mtmp))
@@ -1509,12 +1511,13 @@ mbirth_limit(int mndx)
 /* used for wand/scroll/spell of create monster */
 /* returns TRUE iff you know monsters have been created */
 boolean
-create_critters(int cnt,
-                struct permonst *mptr, /* usually null; used for confused reading */
-                boolean neverask)
+create_critters(
+    int cnt,
+    struct permonst *mptr, /* usually null; used for confused reading */
+    boolean neverask)
 {
     coord c;
-    int x, y;
+    coordxy x, y;
     struct monst *mon;
     boolean known = FALSE;
     boolean ask = (wizard && !neverask);
@@ -1963,13 +1966,15 @@ grow_up(struct monst *mtmp, struct monst *victim)
                   an(buf));
         }
         set_mon_data(mtmp, ptr);
+        if (mtmp->cham == oldtype && is_shapeshifter(ptr))
+            mtmp->cham = newtype; /* vampire growing into vampire lord */
         newsym(mtmp->mx, mtmp->my);    /* color may change */
         lev_limit = (int) mtmp->m_lev; /* never undo increment */
 
         mtmp->female = fem; /* gender might be changing */
         /* if 'mtmp' is leashed, persistent inventory window needs updating */
         if (mtmp->mleashed)
-            update_inventory(); /* x - leash (attached to a <mon> */
+            update_inventory(); /* x - leash (attached to a <mon>) */
     }
 
     /* sanity checks */

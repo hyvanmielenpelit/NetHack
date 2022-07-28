@@ -81,6 +81,15 @@ enum dismount_types {
     DISMOUNT_BYCHOICE = 6
 };
 
+/* polyself flags */
+enum polyself_flags {
+    POLY_NOFLAGS    = 0x00,
+    POLY_CONTROLLED = 0x01,
+    POLY_MONSTER    = 0x02,
+    POLY_REVERT     = 0x04,
+    POLY_LOW_CTRL   = 0x08
+};
+
 /* sellobj_state() states */
 #define SELL_NORMAL (0)
 #define SELL_DELIBERATE (1)
@@ -170,13 +179,13 @@ typedef union str_or_len {
 /* lev_region from sp_lev.h */
 typedef struct {
     struct {
-        xchar x1, y1, x2, y2;
+        coordxy x1, y1, x2, y2;
     } inarea;
     struct {
-        xchar x1, y1, x2, y2;
+        coordxy x1, y1, x2, y2;
     } delarea;
     boolean in_islev, del_islev;
-    xchar rtype, padding;
+    coordxy rtype, padding;
     Str_or_Len rname;
 } lev_region;
 
@@ -245,15 +254,20 @@ enum saveformats {
     ascii = 3           /* each field, ascii text (just proof of concept) */
 };
 
+enum restore_stages {
+    REST_GSTATE = 1,    /* restoring current level and game state */
+    REST_LEVELS = 2,    /* restoring remainder of dungeon */
+};
+
 /* sortloot() return type; needed before extern.h */
 struct sortloot_item {
     struct obj *obj;
     char *str; /* result of loot_xname(obj) in some cases, otherwise null */
     int indx; /* signed int, because sortloot()'s qsort comparison routine
                  assumes (a->indx - b->indx) might yield a negative result */
-    xchar orderclass; /* order rather than object class; 0 => not yet init'd */
-    xchar subclass; /* subclass for some classes */
-    xchar disco; /* discovery status */
+    xint16 orderclass; /* order rather than object class; 0 => not yet init'd */
+    xint16 subclass; /* subclass for some classes */
+    xint16 disco; /* discovery status */
 };
 typedef struct sortloot_item Loot;
 
@@ -426,6 +440,7 @@ typedef uint32_t mmflags_nht;     /* makemon MM_ flags */
 #define MMOVE_MOVED   1 /* monster moved */
 #define MMOVE_DIED    2 /* monster died */
 #define MMOVE_DONE    3 /* monster used up all actions */
+#define MMOVE_NOMOVES 4 /* monster has no valid locations to move to */
 
 /*** some utility macros ***/
 #define yn(query) yn_function(query, ynchars, 'n')
@@ -627,6 +642,25 @@ enum getobj_callback_returns {
  * effectively an extra dobuzz type, and some zap.c code needs to be aware of
  * it.  */
 #define PHYS_EXPL_TYPE -1
+
+/* macros for dobuzz() type */
+#define BZ_VALID_ADTYP(adtyp) ((adtyp) >= AD_MAGM && (adtyp) <= AD_SPC2)
+
+#define BZ_OFS_AD(adtyp) (abs((adtyp) - AD_MAGM) % 10)
+#define BZ_OFS_WAN(otyp) (abs((otyp) - WAN_MAGIC_MISSILE) % 10)
+#define BZ_OFS_SPE(otyp) (abs((otyp) - SPE_MAGIC_MISSILE) % 10)
+/* hero shooting a wand */
+#define BZ_U_WAND(bztyp) (0 + (bztyp))
+/* hero casting a spell */
+#define BZ_U_SPELL(bztyp) (10 + (bztyp))
+/* hero breathing as a monster */
+#define BZ_U_BREATH(bztyp) (20 + (bztyp))
+/* monster casting a spell */
+#define BZ_M_SPELL(bztyp) (-10 - (bztyp))
+/* monster breathing */
+#define BZ_M_BREATH(bztyp) (-20 - (bztyp))
+/* monster shooting a wand */
+#define BZ_M_WAND(bztyp) (-30 - (bztyp))
 
 /*
  * option setting restrictions
@@ -837,7 +871,8 @@ enum verbosity_values {
     vb3hit                   = 0x01000000,
     vb3miss                  = 0x02000000,
     vb3makewish              = 0x04000000,
-    /* 4 available bits*/
+    vb3prinv                 = 0x08000000,
+    /* 3 available bits*/
 
     vb4do_attack             = 0x00000001,
     vb4known_hitum           = 0x00000002,

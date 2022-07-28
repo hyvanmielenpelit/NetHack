@@ -1,4 +1,4 @@
-HDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.946 $ $NHDT-Date: 1654931291 2022/06/11 07:08:11 $
+HDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.975 $ $NHDT-Date: 1657868310 2022/07/15 06:58:30 $
 
 General Fixes and Modified Features
 -----------------------------------
@@ -533,8 +533,7 @@ dying from being level-drained below level 1 killed hero without saying so
 	and jumped straight to "do you want your possessions identified?"
 conflict will now consider your charisma and requires line of sight
 boost hit points of some golems
-make anti-magic fields drain more energy and prevent them from showing up
-	too early in the dungeon
+make anti-magic fields always drain max energy
 eating magical monsters such as wizards or shamans may give a mild buzz
 make exploding spheres create an actual explosion
 pets are more careful about attacking monsters at low health
@@ -826,7 +825,8 @@ if a lit potion of oil on the floor was launched by an explosion and it hit
 	tried to extinguish it as a light source
 place_object() validated coordinates after using them to index level.objects
 killed rope golem may drop leashes and bullwhips
-using magic portals and level teleporters stuns hero for a few turns
+using magic portals stuns hero for a few turns
+using level teleporters confuses hero without teleport control for a few turns
 clear obj->bypass for buried objects [a giant on ice triggers a fire trap,
 	inventory is subjected to burning and surviving objects have their
 	bypass bit set, giant is killed by fire trap and drops a boulder and
@@ -925,6 +925,62 @@ be less specific when cause of death is "handling a <ring or wand>" that
 adjust the row placement of copyright and early startup messages so that
 	aren't partially overwritten by prompts that follow
 ball and chain could be accessed after having been freed if bones were saved
+early post-3.4.3 tried to fix the "naming artifacts trick" which could be used
+	to distinguish the type of some undiscovered items, but using a name
+	that only matched an artifact after capitalization was exploitable
+the u.ustuck hierarchy is:  swallowed by ustuck, hero poly'd into sticky form
+	is holding ustuck even if ustuck is sticky, ustuck is holding hero;
+	but some code assumed that the first two cases were reversed and
+	could make formerly sticky pold'd hero clear ustuck, leaving hero
+	swallowed by nothing (u.uswallow==1 with u.ustuck==NULL); that could
+	cause a crash if u.ustuck got dereferenced
+when a vampire gains levels and grows into a vampire lord, change its cham
+	field (shapechanger base type) from vampire to vampire lord so that if
+	it revives in base form it won't revert to plain vampire
+a migrating long worm that couldn't arrive could be placed at <0,0> while
+	setting up another migration attempt to the level, triggering
+        impossible "trying to place long worm tail at <0,0> mstate:8 on level"
+	(message is confused; it should say "long worm" without tail)
+dropping things with 'D' wouldn't merge them with compatible items already at
+	that floor spot because use of obj->bypass made them seem incompatible
+a hero on the quest home level who runs or travels past the quest leader and
+	gets tossed out of the quest for some reason would keep running on the
+	far side of the quest portal
+allow rush/run over water if wearing discovered water walking boots
+flying pets wouldn't target underwater food but if they happened to fly over
+	such food they could and would eat it
+praying on an altar with pet corpse on it can revive the pet
+applying a cursed oil lamp can make your hands slippery
+valkyries start with a spear instead of a long sword
+grid bugs don't have hands
+if #wizmakemap was used to generate a replacement level while any shopkeeper,
+	temple priest, or vault guard from the level was off of it at the
+	time, the monster's eshk, epri, or egd data became invalid and would
+	cause trouble if the monster returned to its 'home' level
+similarly, if #wizfliplevel was used to transpose an active level while a
+	vauld guard was maintaining a temporary corridor or while a monster
+	with eshk, epri, or egd data was off level, that data became invalid
+blessed potion of polymorph will prompt user for monster to poly into
+out of array bounds access attempt occurred when deciding whether to bounce
+	if wand or spell zap reached edge of map
+if blind hero was challanged by a vault guard, it wasn't possible to see how
+	to start following that guard out of the vault
+make taming via magic harp be consistent with scroll of taming and charm
+	spell:  an angry shopkeeper becomes pacified (but never tamed)
+wielding a bec de corbin makes ravens generate peaceful
+moving with 'm' prefix allows hero to enter a known pit carefully
+rangers always succeed in disarming bear traps, unless impaired
+bigroom variant 2 may have ice floor in unlit areas
+some large monsters can knock back smaller monsters with a hit
+change Demonbane to a mace, make it the first sac gift for priests,
+	and give it an invoke ability to banish demons
+wielding Giantslayer prevents knockback from larger monsters
+scared hostile monster which cannot move away will attack
+prevent a fog cloud that has engulfed the hero from moving under closed doors
+allow cutting a known spider web with wielded weapon by force-fighting the web
+holes and trapdoors have a fixed exit level
+recent changes to losedogs() could result in an infinite loop when migrating
+	monsters try to arrive as hero moves to a different level
 
 
 Fixes to 3.7.0-x Problems that Were Exposed Via git Repository
@@ -1170,7 +1226,8 @@ have com_pager() check for failed nhl_init(); probably can't actually happen
 	because the program would never get that far if lua init was failing
 rearranging first-kill and first-hit gamelog messages to get hit before kill
 	ordering resulted in "hit with a wielded weapon for first time" being
-	given twice if that hit was delivered via applied polearm
+	given twice if that hit was delivered via applied polearm or via a
+	joust hit
 rearranging the feedback for first-kill and first-hit introduced a bug by
 	not verifying that the wielded item used to hit was a weapon, giving
 	erroneous event feedback and potentially giving it over and over for
@@ -1227,6 +1284,8 @@ revised monster teleportation message handling caused magic whistle to be
 	changed to not operate on pets that were already adjacent; change back
 revised monster teleportation message handling could produce duplicate message
 	when shopkeeper who left shop got returned to it
+revised magic whistle produced message sequencing issues when summoned pet
+	arrived on a trap, particularly if killed or sent away or shape changed
 recent changes in removing a dead monster from the map didn't update screen
 	to show objects it dropped; they were present, just not displayed
 further changes resulted in dead monsters' corpses be placed at <0,0>;
@@ -1248,6 +1307,21 @@ activating a magic portal still gave "you feel dizzy for a moment, but the
 after the fix for zombie reviving near hero (which now interrupts hero's
 	occupation), could get "revive panic" when eating a troll corpse if
 	it revived on the same turn that eating the corpse would finish
+a wizard's starting equipment was supposed to include a random spellbook of
+	spell level 1 through 3 but it was being foced to be level 1
+earlier fix for prices of unpaid objects going away in persistent inventory
+	display when hero bought something during itemized billing didn't work
+	if paying for a used-up shop item--prices of any unpaid items vanished
+	when inventory got updated to reflect transfer of hero's gold to shk
+save files created with SCORE_ON_BOTL disabled were erroneously being rejected
+	if the program was rebuilt with it enabled and vice versa
+avoid "It suddenly appears!" if a monster with the STRAT_APPEARMSG attribute
+	is seen to teleport away then not seen at its destination
+avoid boulder-on/in-water sanity_check warnings on the Plane of Water
+when one monster swallowed/engulfed another and killed it, impossible
+	"placing <mon> over itself ..." could be given by place_monster()
+if the game crashed or the process was killed, recovering a save file ended
+	up with incorrect stairway connections between levels
 
 curses: 'msg_window' option wasn't functional for curses unless the binary
 	also included tty support
@@ -1674,6 +1748,9 @@ if built with DEBUG enabled and running in wizard mode, starting play with
 	DEBUGFILES=seethru in environment makes clouds on the Plane of Air,
 	water on Plane of Water, and fumaroles on Plane of Fire be transparent
 add wizard mode #wizkill command to remove monster(s) from play
+some quest nemeses release a cloud of poisonous gas when they die
+taming magic acting on an already tame creature might make it become tamer
+eliminate scimitar skill and have scimitars use saber skill
 
 
 Platform- and/or Interface-Specific New Features
@@ -1837,6 +1914,7 @@ wished-for doors in wizmode always vertical (pr #788 by entrez)
 vampire shapeshifting in a door (pr #794 by entrez)
 split "act_on_act" into separate function (pr #777 by argrath)
 unnecessary null-check on parsesymbols() (pr #793 by argrath)
+split cleaning-up on gd_move() into separate function (pr #791 by argrath)
 
 
 Code Cleanup and Reorganization

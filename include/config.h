@@ -560,6 +560,10 @@ typedef unsigned char uchar;
 /* #define TTY_TILES_ESCCODES */
 /* #define TTY_SOUND_ESCCODES */
 
+/* An experimental minimalist inventory list capability under tty if you have
+ * at least 28 additional rows beneath the status window on your terminal  */
+/* #define TTY_PERM_INVENT */
+
 /* NetHack will execute an external program whenever a new message-window
  * message is shown.  The program to execute is given in environment variable
  * NETHACK_MSGHANDLER.  It will get the message as the only parameter.
@@ -572,8 +576,10 @@ typedef unsigned char uchar;
 
 /* #define WINCHAIN */              /* stacked window systems */
 
-/* #define DEBUG_MIGRATING_MONS */  /* add a wizard-mode command to help debug
-                                       migrating monsters */
+#if defined(DEBUG) && !defined(DEBUG_MIGRATING_MONS)
+#define DEBUG_MIGRATING_MONS  /* add a wizard-mode command to help debug
+                                 migrating monsters */
+#endif
 
 /* SCORE_ON_BOTL is neither experimental nor inadequately tested,
    but doesn't seem to fit in any other section... */
