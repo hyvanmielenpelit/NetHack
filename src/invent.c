@@ -1887,7 +1887,7 @@ ckvalidcat(struct obj *otmp)
 static int
 ckunpaid(struct obj *otmp)
 {
-    return (otmp->unpaid || (Has_contents(otmp) && count_unpaid(otmp->cobj)));
+    return (otmp->unpaid || (Has_contents(otmp) && count_unpaid(otmp->cobj, FALSE)));
 }
 
 boolean
@@ -1967,7 +1967,7 @@ ggetobj(const char *word, int (*fn)(OBJ_P), int mx,
     }
 
     iletct = collect_obj_classes(ilets, g.invent, FALSE, ofilter, &itemcount);
-    unpaid = count_unpaid(g.invent);
+    unpaid = count_unpaid(g.invent, FALSE);
 
     if (ident && !iletct) {
         return -1; /* no further identifications */
@@ -1975,13 +1975,13 @@ ggetobj(const char *word, int (*fn)(OBJ_P), int mx,
         ilets[iletct++] = ' ';
         if (unpaid)
             ilets[iletct++] = 'u';
-        if (count_buc(g.invent, BUC_BLESSED, ofilter))
+        if (count_buc(g.invent, BUC_BLESSED, ofilter, FALSE))
             ilets[iletct++] = 'B';
-        if (count_buc(g.invent, BUC_UNCURSED, ofilter))
+        if (count_buc(g.invent, BUC_UNCURSED, ofilter, FALSE))
             ilets[iletct++] = 'U';
-        if (count_buc(g.invent, BUC_CURSED, ofilter))
+        if (count_buc(g.invent, BUC_CURSED, ofilter, FALSE))
             ilets[iletct++] = 'C';
-        if (count_buc(g.invent, BUC_UNKNOWN, ofilter))
+        if (count_buc(g.invent, BUC_UNKNOWN, ofilter, FALSE))
             ilets[iletct++] = 'X';
         if (count_justpicked(g.invent))
             ilets[iletct++] = 'P';
@@ -3564,7 +3564,7 @@ display_used_invlets(char avoidlet)
  * contained objects.
  */
 int
-count_unpaid(struct obj *list)
+count_unpaid(struct obj *list, boolean bynexthere)
 {
     int count = 0;
 
@@ -3572,8 +3572,11 @@ count_unpaid(struct obj *list)
         if (list->unpaid)
             count++;
         if (Has_contents(list))
-            count += count_unpaid(list->cobj);
-        list = list->nobj;
+            count += count_unpaid(list->cobj, FALSE);
+        if (bynexthere)
+            list = list->nexthere;
+        else
+            list = list->nobj;
     }
     return count;
 }
@@ -3586,11 +3589,11 @@ count_unpaid(struct obj *list)
  * at some point:  bknown is forced for priest[ess], like in xname().
  */
 int
-count_buc(struct obj *list, int type, boolean (*filterfunc)(OBJ_P))
+count_buc(struct obj *list, int type, boolean (*filterfunc)(OBJ_P), boolean bynexthere)
 {
     int count = 0;
 
-    for (; list; list = list->nobj) {
+    for (; list; list = (bynexthere ? list->nexthere : list->nobj)) {
         /* priests always know bless/curse state */
         if (Role_if(PM_CLERIC))
             list->bknown = (list->oclass != COIN_CLASS);
@@ -3698,7 +3701,7 @@ dounpaid(void)
     int classcount, count, num_so_far;
     long cost, totcost;
 
-    count = count_unpaid(g.invent);
+    count = count_unpaid(g.invent, FALSE);
     otmp = marker = contnr = (struct obj *) 0;
 
     if (count == 1) {
@@ -3846,7 +3849,7 @@ dotypeinv(void)
         goto doI_done;
     }
     title[0] = '\0';
-    unpaid_count = count_unpaid(g.invent);
+    unpaid_count = count_unpaid(g.invent, FALSE);
     tally_BUCX(g.invent, FALSE, &bcnt, &ucnt, &ccnt, &xcnt, &ocnt, &jcnt);
 
     if (flags.menu_style != MENU_TRADITIONAL) {

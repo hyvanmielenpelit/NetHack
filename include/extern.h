@@ -1167,8 +1167,8 @@ extern boolean check_invent_gold(const char *);
 extern int doorganize(void);
 extern int adjust_split(void);
 extern void free_pickinv_cache(void);
-extern int count_unpaid(struct obj *);
-extern int count_buc(struct obj *, int, boolean(*)(struct obj *));
+extern int count_unpaid(struct obj *, boolean);
+extern int count_buc(struct obj *, int, boolean (*)(struct obj *), boolean);
 extern void tally_BUCX(struct obj *, boolean, int *, int *, int *, int *,
                        int *, int *);
 extern long count_contents(struct obj *, boolean, boolean, boolean, boolean);

@@ -160,7 +160,7 @@ query_classes(char oclasses[], boolean *one_at_a_time, boolean *everything,
     }
     if (itemcount && menu_on_demand)
         ilets[iletct++] = 'm';
-    if (count_unpaid(objs))
+    if (count_unpaid(objs, here))
         ilets[iletct++] = 'u';
 
     tally_BUCX(objs, here, &bcnt, &ucnt, &ccnt, &xcnt, &ocnt, &jcnt);
@@ -489,7 +489,7 @@ allow_category(struct obj *obj)
     /* if unpaid is expected and obj isn't unpaid, reject (treat a container
        holding any unpaid object as unpaid even if isn't unpaid itself) */
     if (g.shop_filter && !obj->unpaid
-        && !(Has_contents(obj) && count_unpaid(obj->cobj) > 0))
+        && !(Has_contents(obj) && count_unpaid(obj->cobj, FALSE) > 0))
         return FALSE;
     /* check for particular bless/curse state */
     if (g.bucx_filter) {
@@ -1158,27 +1158,28 @@ query_category(const char *qstr,      /* query string */
     unsigned itemflags = MENU_ITEMFLAGS_NONE;
     int num_justpicked = 0;
     int clr = 0;
+    boolean here = !!(qflags & BY_NEXTHERE);
 
     *pick_list = (menu_item *) 0;
     if (!olist)
         return 0;
-    if ((qflags & UNPAID_TYPES) && count_unpaid(olist))
+    if ((qflags & UNPAID_TYPES) && count_unpaid(olist, here))
         do_unpaid = TRUE;
     if (qflags & WORN_TYPES)
         ofilter = is_worn;
-    if ((qflags & BUC_BLESSED) && count_buc(olist, BUC_BLESSED, ofilter)) {
+    if ((qflags & BUC_BLESSED) && count_buc(olist, BUC_BLESSED, ofilter, here)) {
         do_blessed = TRUE;
         num_buc_types++;
     }
-    if ((qflags & BUC_CURSED) && count_buc(olist, BUC_CURSED, ofilter)) {
+    if ((qflags & BUC_CURSED) && count_buc(olist, BUC_CURSED, ofilter, here)) {
         do_cursed = TRUE;
         num_buc_types++;
     }
-    if ((qflags & BUC_UNCURSED) && count_buc(olist, BUC_UNCURSED, ofilter)) {
+    if ((qflags & BUC_UNCURSED) && count_buc(olist, BUC_UNCURSED, ofilter, here)) {
         do_uncursed = TRUE;
         num_buc_types++;
     }
-    if ((qflags & BUC_UNKNOWN) && count_buc(olist, BUC_UNKNOWN, ofilter)) {
+    if ((qflags & BUC_UNKNOWN) && count_buc(olist, BUC_UNKNOWN, ofilter, here)) {
         do_buc_unknown = TRUE;
         num_buc_types++;
     }

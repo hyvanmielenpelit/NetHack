@@ -891,7 +891,7 @@ boolean
 is_unpaid(struct obj* obj)
 {
     return (boolean) (obj->unpaid
-                      || (Has_contents(obj) && count_unpaid(obj->cobj)));
+                      || (Has_contents(obj) && count_unpaid(obj->cobj, FALSE)));
 }
 
 /* Delete the contents of the given object. */
@@ -2694,7 +2694,7 @@ addtobill(
 
         if (obj->no_charge)
             obj->no_charge = 0;
-        contentscount = count_unpaid(obj->cobj);
+        contentscount = count_unpaid(obj->cobj, FALSE);
     } else { /* !container */
         add_one_tobill(obj, dummy, shkp);
         contentscount = 0;
