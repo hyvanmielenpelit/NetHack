@@ -171,9 +171,11 @@ enum objects_nums {
 };
 
 enum misc_object_nums {
-    LAST_GEM = (JADE),
-    NUM_GLASS_GEMS = ((LUCKSTONE - JADE) - 1),
-    MAXSPELL = ((SPE_BOOK_OF_THE_DEAD - SCR_BLANK_PAPER) + 1)
+    NUM_REAL_GEMS  = (LAST_REAL_GEM - FIRST_REAL_GEM + 1),
+    NUM_GLASS_GEMS = (LAST_GLASS_GEM - FIRST_GLASS_GEM + 1),
+    /* LAST_SPELL is SPE_BLANK_PAPER, guaranteeing that spl_book[] will
+       have at least one unused slot at end to be used as a terminator */
+    MAXSPELL       = (LAST_SPELL - FIRST_SPELL + 1),
 };
 
 extern NEARDATA struct objclass objects[NUM_OBJECTS + 1];
@@ -190,6 +192,9 @@ extern NEARDATA struct objdescr obj_descr[NUM_OBJECTS + 1];
 /* primary damage: fire/rust/--- */
 /* is_flammable(otmp), is_rottable(otmp) in mkobj.c */
 #define is_rustprone(otmp) (objects[otmp->otyp].oc_material == IRON)
+#define is_crackable(otmp) \
+    (objects[(otmp)->otyp].oc_material == GLASS         \
+     && (otmp)->oclass == ARMOR_CLASS) /* erosion_matters() */
 /* secondary damage: rot/acid/acid */
 #define is_corrodeable(otmp) \
     (objects[otmp->otyp].oc_material == COPPER          \
@@ -197,6 +202,7 @@ extern NEARDATA struct objdescr obj_descr[NUM_OBJECTS + 1];
 /* subject to any damage */
 #define is_damageable(otmp) \
     (is_rustprone(otmp) || is_flammable(otmp)           \
-     || is_rottable(otmp) || is_corrodeable(otmp))
+     || is_rottable(otmp) || is_corrodeable(otmp)       \
+     || is_crackable(otmp))
 
 #endif /* OBJCLASS_H */

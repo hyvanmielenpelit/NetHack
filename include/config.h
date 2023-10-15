@@ -1,4 +1,4 @@
-/* NetHack 3.7	config.h	$NHDT-Date: 1610141601 2021/01/08 21:33:21 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.148 $ */
+/* NetHack 3.7	config.h	$NHDT-Date: 1693359531 2023/08/30 01:38:51 $  $NHDT-Branch: keni-crashweb2 $:$NHDT-Revision: 1.175 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2016. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -53,7 +53,7 @@
  * Some combinations make no sense.  See the installation document.
  */
 #if !defined(NOTTYGRAPHICS)
-#define TTY_GRAPHICS /* good old tty based graphics */
+#define TTY_GRAPHICS /* good old tty-based graphics */
 #endif
 /* #define CURSES_GRAPHICS *//* Curses interface - Karl Garrison*/
 /* #define X11_GRAPHICS */   /* X11 interface */
@@ -98,9 +98,6 @@
 #ifndef DEFAULT_WC_TILED_MAP
 #define DEFAULT_WC_TILED_MAP /* Default to tiles if users doesn't say \
                                 wc_ascii_map */
-#endif
-#ifndef NOUSER_SOUNDS
-#define USER_SOUNDS /* Use sounds */
 #endif
 #ifndef USE_XPM
 #define USE_XPM           /* Use XPM format for images (required) */
@@ -202,9 +199,16 @@
  *              PERS_IS_UID  (0 or 1 - person is name or (numeric) userid)
  *            Can force incubi/succubi behavior to be toned down to nymph-like:
  *              SEDUCE       (0 or 1 - runtime disable/enable SEDUCE option)
+ *            Can hide the entry for displaying command line usage from
+ *            the help menu if players don't have access to command lines:
+ *              HIDEUSAGE    (0 or 1 - runtime show/hide command line usage)
  *            The following options pertain to crash reporting:
  *              GREPPATH     (the path to the system grep(1) utility)
  *              GDBPATH      (the path to the system gdb(1) program)
+ *              CRASHREPORT  (use CRASHREPORTURL if defined in syscf; this
+ *                           define specifies the name of the helper program
+ *                           used to launch the browser and enables the
+ *                           feature))
  *            Regular nethack options can also be specified in order to
  *            provide system-wide default values local to your system:
  *              OPTIONS      (same as in users' .nethackrc or defaults.nh)
@@ -233,6 +237,17 @@
 #endif
 #ifndef GREPPATH
 #define GREPPATH "/bin/grep"
+#endif
+
+#ifndef CRASHREPORT
+# ifdef MACOS
+    /* NB: This needs to be a full path unless it's in the playground. */
+//#define CRASHREPORT "NetHackCrashReport.JavaScript"
+# endif
+# ifdef __linux__
+    /* NB: This expects to find the nhlua binary as "./nhlua" */
+//#define CRASHREPORT "nhcrashreport.lua"
+# endif
 #endif
 
 /* note: "larger" is in comparison with 'record', the high-scores file
@@ -277,6 +292,9 @@
  *      uncommented to define NODUMPENUMS. Doing so will disable the
  *          nethack --dumpenums
  *      command line option.
+ *      Note:  the extra memory is also used when ENHANCED_SYMBOLS is
+ *      defined, so defining both ENHANCED_SYMBOLS and NODUMPENUMS will limit
+ *      the amount of memory and code reduction offered by the latter.
  */
 /* #define NODUMPENUMS */
 
@@ -418,6 +436,7 @@
  */
 #endif /* CHDIR */
 
+
 /*
  * Section 3:   Definitions that may vary with system type.
  *              For example, both schar and uchar should be short ints on
@@ -528,7 +547,7 @@ typedef unsigned char uchar;
 #define SELECTSAVED /* support for restoring via menu */
 
 /* TTY_TILES_ESCCODES: Enable output of special console escape codes
- * which act as hints for external programs such as EbonHack, or hterm.
+ * which act as hints for external programs such as EbonHack or hterm.
  *
  * TTY_SOUND_ESCCODES: Enable output of special console escape codes
  * which act as hints for theoretical external programs to play sound effect.
@@ -555,7 +574,8 @@ typedef unsigned char uchar;
  *
  * To compile NetHack with this, add tile.c to WINSRC and tile.o to WINOBJ
  * in the hints file or Makefile.
- * Set boolean option vt_xdata in your config file to turn either of these on.
+ * Set boolean option vt_tiledata and/or vt_sounddata in your config file
+ * to turn either of these on.
  * Note that gnome-terminal at least doesn't work with this. */
 /* #define TTY_TILES_ESCCODES */
 /* #define TTY_SOUND_ESCCODES */
@@ -620,21 +640,45 @@ typedef unsigned char uchar;
 #ifdef CHRONICLE
 /* LIVELOG - log CHRONICLE events into LIVELOGFILE as they happen. */
 /* #define LIVELOG */
-#ifdef LIVELOG
-#define LIVELOGFILE "livelog" /* in-game events recorded, live */
-#endif /* LIVELOG */
 #endif /* CHRONICLE */
 #else
 #undef LIVELOG
 #endif /* NO_CHRONICLE */
 
 /* #define DUMPLOG */  /* End-of-game dump logs */
-#ifdef DUMPLOG
 
-#ifndef DUMPLOG_MSG_COUNT
-#define DUMPLOG_MSG_COUNT   50
+#define USE_ISAAC64 /* Use cross-plattform, bundled RNG */
+
+/* TEMPORARY - MAKE UNCONDITIONAL BEFORE RELEASE */
+/* undef this to check if sandbox breaks something */
+#define NHL_SANDBOX
+
+/* End of Section 4 */
+
+#ifdef TTY_TILES_ESCCODES
+# ifndef TILES_IN_GLYPHMAP
+#  define TILES_IN_GLYPHMAP
+# endif
 #endif
 
+#include "cstd.h"
+#include "integer.h"
+#include "global.h" /* Define everything else according to choices above */
+
+/* Place the following after #include [platform]conf.h in global.h so that
+   overrides are possible in there, for things like unix-specfic file
+   paths. */
+
+#ifdef LIVELOG
+#ifndef LIVELOGFILE
+#define LIVELOGFILE "livelog" /* in-game events recorded, live */
+#endif /* LIVELOGFILE */
+#endif /* LIVELOG */
+
+#ifdef DUMPLOG
+#ifndef DUMPLOG_MSG_COUNT
+#define DUMPLOG_MSG_COUNT   50
+#endif /* DUMPLOG_MSG_COUNT */
 #ifndef DUMPLOG_FILE
 #define DUMPLOG_FILE        "/tmp/nethack.%n.%d.log"
 /* DUMPLOG_FILE allows following placeholders:
@@ -649,25 +693,7 @@ typedef unsigned char uchar;
    %N first character of player name
    DUMPLOG_FILE is not used if SYSCF is defined
 */
-#endif
-
-#endif
-
-#define USE_ISAAC64 /* Use cross-plattform, bundled RNG */
-
-/* TEMPORARY - MAKE UNCONDITIONAL BEFORE RELEASE */
-/* undef this to check if sandbox breaks something */
-#define NHL_SANDBOX
-
-/* End of Section 4 */
-
-#ifdef TTY_TILES_ESCCODES
-# ifndef USE_TILES
-#  define USE_TILES
-# endif
-#endif
-
-#include "integer.h"
-#include "global.h" /* Define everything else according to choices above */
+#endif /* DUMPLOG_FILE */
+#endif /* DUMPLOG */
 
 #endif /* CONFIG_H */

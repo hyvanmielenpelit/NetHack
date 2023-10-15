@@ -1,4 +1,4 @@
-/* NetHack 3.7	vmsmain.c	$NHDT-Date: 1596498307 2020/08/03 23:45:07 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.45 $ */
+/* NetHack 3.7	vmsmain.c	$NHDT-Date: 1693359633 2023/08/30 01:40:33 $  $NHDT-Branch: keni-crashweb2 $:$NHDT-Revision: 1.57 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2011. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -6,6 +6,12 @@
 
 #include "hack.h"
 #include "dlb.h"
+
+#ifdef VMSVSI
+#include <descrip.h>
+#include <lib$routines.h>
+#include <starlet.h>
+#endif
 
 #include <signal.h>
 
@@ -27,6 +33,8 @@ static vms_handler_type vms_handler(genericptr_t, genericptr_t);
 static void wd_message(void);
 static boolean wiz_error_flag = FALSE;
 
+static char *progname = (char *) 0;
+
 int
 main(int argc, char *argv[])
 {
@@ -42,12 +50,15 @@ main(int argc, char *argv[])
     privon();
 #endif
 
-    early_init();
+    early_init(argc, argv);
 
     atexit(byebye);
-    g.hname = argv[0];
-    g.hname = vms_basename(g.hname); /* name used in 'usage' type messages */
-    g.hackpid = getpid();
+    /* vms_basename(,FALSE) strips device, directory, suffix, and version;
+       the result is returned in a static buffer so we make a copy that
+       isn't at risk of gettting clobbered by core's handling of DEBUGFILES */
+    progname = dupstr(vms_basename(argv[0], FALSE));
+    gh.hname = progname;
+    gh.hackpid = getpid();
     (void) umask(0);
 
     choose_windows(DEFAULT_WINDOW_SYS);
@@ -156,7 +167,7 @@ main(int argc, char *argv[])
 
     if (wizard) {
         /* use character name rather than lock letter for file names */
-        g.locknum = 0;
+        gl.locknum = 0;
     } else {
         /* suppress interrupts while processing lock file */
         (void) signal(SIGQUIT, SIG_IGN);
@@ -164,14 +175,14 @@ main(int argc, char *argv[])
     }
     /*
      * getlock() complains and quits if there is already a game
-     * in progress for current character name (when g.locknum == 0)
-     * or if there are too many active games (when g.locknum > 0).
+     * in progress for current character name (when gl.locknum == 0)
+     * or if there are too many active games (when gl.locknum > 0).
      * When proceeding, it creates an empty <lockname>.0 file to
      * designate the current game.
      * getlock() constructs <lockname> based on the character
-     * name (for !g.locknum) or on first available of alock, block,
+     * name (for !gl.locknum) or on first available of alock, block,
      * clock, &c not currently in use in the playground directory
-     * (for g.locknum > 0).
+     * (for gl.locknum > 0).
      */
     getlock();
 
@@ -183,7 +194,7 @@ main(int argc, char *argv[])
      */
     vision_init();
 
-    display_gamewindows();
+    init_sound_disp_gamewindows();
 
 /*
  * First, try to find and restore a save file for specified character.
@@ -191,7 +202,7 @@ main(int argc, char *argv[])
  */
 attempt_restore:
     if ((nhfp = restore_saved_game()) != 0) {
-        const char *fq_save = fqname(g.SAVEF, SAVEPREFIX, 1);
+        const char *fq_save = fqname(gs.SAVEF, SAVEPREFIX, 1);
 
         (void) chmod(fq_save, 0); /* disallow parallel restores */
         (void) signal(SIGINT, (SIG_RET_TYPE) done1);
@@ -207,7 +218,7 @@ attempt_restore:
             resuming = TRUE; /* not starting new game */
             wd_message();
             if (discover || wizard) {
-                if (yn("Do you want to keep the save file?") == 'n')
+                if (y_n("Do you want to keep the save file?") == 'n')
                     (void) delete_savefile();
                 else
                     (void) chmod(fq_save, FCMASK); /* back to readable */
@@ -227,7 +238,7 @@ attempt_restore:
                    if locking alphabetically, the existing lock file
                    can still be used; otherwise, discard current one
                    and create another for the new character name */
-                if (!g.locknum) {
+                if (!gl.locknum) {
                     delete_levelfile(0); /* remove empty lock file */
                     getlock();
                 }
@@ -270,11 +281,11 @@ process_options(int argc, char *argv[])
 #endif
         case 'u':
             if (argv[0][2])
-                (void) strncpy(g.plname, argv[0] + 2, sizeof(g.plname) - 1);
+                (void) strncpy(gp.plname, argv[0] + 2, sizeof(gp.plname) - 1);
             else if (argc > 1) {
                 argc--;
                 argv++;
-                (void) strncpy(g.plname, argv[0], sizeof(g.plname) - 1);
+                (void) strncpy(gp.plname, argv[0], sizeof(gp.plname) - 1);
             } else
                 raw_print("Player name expected after -u");
             break;
@@ -328,10 +339,10 @@ process_options(int argc, char *argv[])
     }
 
     if (argc > 1)
-        g.locknum = atoi(argv[1]);
+        gl.locknum = atoi(argv[1]);
 #ifdef MAX_NR_OF_PLAYERS
-    if (!g.locknum || g.locknum > MAX_NR_OF_PLAYERS)
-        g.locknum = MAX_NR_OF_PLAYERS;
+    if (!gl.locknum || gl.locknum > MAX_NR_OF_PLAYERS)
+        gl.locknum = MAX_NR_OF_PLAYERS;
 #endif
 }
 
@@ -379,17 +390,19 @@ whoami(void)
      */
     register char *s;
 
-    if (!*g.plname && (s = nh_getenv("USER")))
-        (void) lcase(strncpy(g.plname, s, sizeof(g.plname) - 1));
+    if (!*gp.plname && (s = nh_getenv("USER")))
+        (void) lcase(strncpy(gp.plname, s, sizeof(gp.plname) - 1));
 }
 
 static void
 byebye(void)
 {
-    void (*hup)(int) ;
+    void (*hup)(int);
 #ifdef SHELL
     extern unsigned long dosh_pid, mail_pid;
+#ifndef VMSVSI
     extern unsigned long sys$delprc(unsigned long *, const genericptr_t);
+#endif
 
     /* clean up any subprocess we've spawned that may still be hanging around
      */
@@ -398,11 +411,19 @@ byebye(void)
     if (mail_pid)
         (void) sys$delprc(&mail_pid, (genericptr_t) 0), mail_pid = 0;
 #endif
+#ifdef FREE_ALL_MEMORY
+    if (progname && !gp.program_state.panicking) {
+        if (gh.hname == progname)
+            gh.hname = (char *) 0;
+        free((genericptr_t) progname), progname = (char *) 0;
+    }
+#endif
 
     /* SIGHUP doesn't seem to do anything on VMS, so we fudge it here... */
-    hup = (void (*)(int) ) signal(SIGHUP, SIG_IGN);
-    if (!g.program_state.exiting++ && hup != (void (*)(int) ) SIG_DFL
-        && hup != (void (*)(int) ) SIG_IGN) {
+    hup = (void (*)(int)) signal(SIGHUP, SIG_IGN);
+    if (!gp.program_state.exiting++
+        && hup != (void (*)(int)) SIG_DFL
+        && hup != (void (*)(int)) SIG_IGN) {
         (*hup)(SIGHUP);
     }
 
@@ -425,7 +446,7 @@ genericptr_t mechargs)     /* [0] is argc, [1..argc] are the real args */
     if (condition == SS$_ACCVIO /* access violation */
         || (condition >= SS$_ASTFLT && condition <= SS$_TBIT)
         || (condition >= SS$_ARTRES && condition <= SS$_INHCHME)) {
-        g.program_state.done_hup = TRUE; /* pretend hangup has been attempted */
+        gp.program_state.done_hup = TRUE; /* pretend hangup has been attempted */
 #if (NH_DEVEL_STATUS == NH_STATUS_RELEASED)
         if (wizard)
 #endif

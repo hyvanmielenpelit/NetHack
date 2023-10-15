@@ -5,12 +5,18 @@
 
 #include <regex>
 #include <memory>
+#include <cstring>
 
-/* nhregex interface documented in sys/share/posixregex.c */
+extern "C" {
+#include "config.h"
+#define CPPREGEX_C
+#include "extern.h"
+} // extern "C"
+
 
 extern "C" { // rest of file
 
-#include "config.h"
+/* nhregex interface documented in sys/share/posixregex.c */
 
 extern const char regex_id[] = "cppregex";
 
@@ -76,7 +82,7 @@ regex_free(struct nhregex *re)
 {
     delete re;
 }
-
+#undef CPPREGEX_C
 } // extern "C"
 
 /*cppregex.cpp*/

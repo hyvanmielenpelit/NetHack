@@ -1,4 +1,4 @@
-/* NetHack 3.7	weapon.c	$NHDT-Date: 1646688071 2022/03/07 21:21:11 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.100 $ */
+/* NetHack 3.7	weapon.c	$NHDT-Date: 1690488665 2023/07/27 20:11:05 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.111 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2011. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -77,11 +77,7 @@ give_may_advance_msg(int skill)
                  : (skill <= P_LAST_WEAPON) ? "weapon "
                      : (skill <= P_LAST_SPELL) ? "spell casting "
                          : "fighting ");
-
-    if (!g.context.enhance_tip) {
-        g.context.enhance_tip = TRUE;
-        pline("(Use the #enhance command to advance them.)");
-    }
+    handle_tip(TIP_ENHANCE);
 }
 
 /* weapon's skill category name for use as generalized description of weapon;
@@ -165,7 +161,7 @@ hitval(struct obj *otmp, struct monst *mon)
     if (Is_weapon && otmp->blessed && mon_hates_blessings(mon))
         tmp += 2;
 
-    if (is_spear(otmp) && index(kebabable, ptr->mlet))
+    if (is_spear(otmp) && strchr(kebabable, ptr->mlet))
         tmp += 2;
 
     /* trident is highly effective against swimmers */
@@ -405,7 +401,7 @@ special_dmgval(
         }
 
     /* when no gloves we check for silver rings (blessed rings ignored) */
-    } else if ((left_ring || right_ring) && magr == &g.youmonst) {
+    } else if ((left_ring || right_ring) && magr == &gy.youmonst) {
         if (left_ring && uleft) {
             if (objects[uleft->otyp].oc_material == SILVER
                 && mon_hates_silver(mdef)) {
@@ -513,7 +509,7 @@ select_rwep(struct monst *mtmp)
 
     char mlet = mtmp->data->mlet;
 
-    g.propellor = (struct obj *) &cg.zeroobj;
+    gp.propellor = (struct obj *) &cg.zeroobj;
     Oselect(EGG);      /* cockatrice egg */
     if (mlet == S_KOP) /* pies are first choice for Kops */
         Oselect(CREAM_PIE);
@@ -545,7 +541,7 @@ select_rwep(struct monst *mtmp)
                     || !mon_hates_silver(mtmp))) {
                 if ((otmp = oselect(mtmp, pwep[i])) != 0
                     && (otmp == mwep || !mweponly)) {
-                    g.propellor = otmp; /* force the monster to wield it */
+                    gp.propellor = otmp; /* force the monster to wield it */
                     return otmp;
                 }
             }
@@ -566,41 +562,41 @@ select_rwep(struct monst *mtmp)
             for (otmp = mtmp->minvent; otmp; otmp = otmp->nobj)
                 if (otmp->oclass == GEM_CLASS
                     && (otmp->otyp != LOADSTONE || !otmp->cursed)) {
-                    g.propellor = m_carrying(mtmp, SLING);
+                    gp.propellor = m_carrying(mtmp, SLING);
                     return otmp;
                 }
         }
 
         /* KMH -- This belongs here so darts will work */
-        g.propellor = (struct obj *) &cg.zeroobj;
+        gp.propellor = (struct obj *) &cg.zeroobj;
 
         prop = objects[rwep[i]].oc_skill;
         if (prop < 0) {
             switch (-prop) {
             case P_BOW:
-                g.propellor = oselect(mtmp, YUMI);
-                if (!g.propellor)
-                    g.propellor = oselect(mtmp, ELVEN_BOW);
-                if (!g.propellor)
-                    g.propellor = oselect(mtmp, BOW);
-                if (!g.propellor)
-                    g.propellor = oselect(mtmp, ORCISH_BOW);
+                gp.propellor = oselect(mtmp, YUMI);
+                if (!gp.propellor)
+                    gp.propellor = oselect(mtmp, ELVEN_BOW);
+                if (!gp.propellor)
+                    gp.propellor = oselect(mtmp, BOW);
+                if (!gp.propellor)
+                    gp.propellor = oselect(mtmp, ORCISH_BOW);
                 break;
             case P_SLING:
-                g.propellor = oselect(mtmp, SLING);
+                gp.propellor = oselect(mtmp, SLING);
                 break;
             case P_CROSSBOW:
-                g.propellor = oselect(mtmp, CROSSBOW);
+                gp.propellor = oselect(mtmp, CROSSBOW);
             }
-            if ((otmp = MON_WEP(mtmp)) && mwelded(otmp) && otmp != g.propellor
+            if ((otmp = MON_WEP(mtmp)) && mwelded(otmp) && otmp != gp.propellor
                 && mtmp->weapon_check == NO_WEAPON_WANTED)
-                g.propellor = 0;
+                gp.propellor = 0;
         }
         /* propellor = obj, propellor to use
          * propellor = &cg.zeroobj, doesn't need a propellor
          * propellor = 0, needed one and didn't have one
          */
-        if (g.propellor != 0) {
+        if (gp.propellor != 0) {
             /* Note: cannot use m_carrying for loadstones, since it will
              * always select the first object of a type, and maybe the
              * monster is carrying two but only the first is unthrowable.
@@ -667,6 +663,8 @@ select_hwep(struct monst *mtmp)
 
     if (is_giant(mtmp->data)) /* giants just love to use clubs */
         Oselect(CLUB);
+    else if (mtmp->data == &mons[PM_BALROG] && uwep)
+        Oselect(BULLWHIP);
 
     /* only strong monsters can wield big (esp. long) weapons */
     /* big weapon is basically the same as bimanual */
@@ -746,6 +744,7 @@ int
 mon_wield_item(struct monst *mon)
 {
     struct obj *obj;
+    boolean exclaim = TRUE; /* assume mon is planning to attack */
 
     /* This case actually should never happen */
     if (mon->weapon_check == NO_WEAPON_WANTED)
@@ -756,19 +755,21 @@ mon_wield_item(struct monst *mon)
         break;
     case NEED_RANGED_WEAPON:
         (void) select_rwep(mon);
-        obj = g.propellor;
+        obj = gp.propellor;
         break;
     case NEED_PICK_AXE:
         obj = m_carrying(mon, PICK_AXE);
         /* KMH -- allow other picks */
         if (!obj && !which_armor(mon, W_ARMS))
             obj = m_carrying(mon, DWARVISH_MATTOCK);
+        exclaim = FALSE; /* mon is just planning to dig */
         break;
     case NEED_AXE:
         /* currently, only 2 types of axe */
         obj = m_carrying(mon, BATTLE_AXE);
         if (!obj || which_armor(mon, W_ARMS))
             obj = m_carrying(mon, AXE);
+        exclaim = FALSE;
         break;
     case NEED_PICK_OR_AXE:
         /* prefer pick for fewer switches on most levels */
@@ -780,6 +781,7 @@ mon_wield_item(struct monst *mon)
             if (!obj)
                 obj = m_carrying(mon, AXE);
         }
+        exclaim = FALSE;
         break;
     default:
         impossible("weapon_check %d for %s?", mon->weapon_check,
@@ -829,7 +831,8 @@ mon_wield_item(struct monst *mon)
         if (canseemon(mon)) {
             boolean newly_welded;
 
-            pline("%s wields %s!", Monnam(mon), doname(obj));
+            pline("%s wields %s%c", Monnam(mon), doname(obj),
+                  exclaim ? '!' : '.');
             /* 3.6.3: mwelded() predicate expects the object to have its
                W_WEP bit set in owormmask, but the pline here and for
                artifact_light don't want that because they'd have '(weapon
@@ -858,9 +861,7 @@ mon_wield_item(struct monst *mon)
             /* 3.6.3: artifact might be getting wielded by invisible monst */
             else if (cansee(mon->mx, mon->my))
                 pline("Light begins shining %s.",
-                      (distu(mon->mx, mon->my) <= 5 * 5)
-                          ? "nearby"
-                          : "in the distance");
+                      (mdistu(mon) <= 5 * 5) ? "nearby" : "in the distance");
         }
         obj->owornmask = W_WEP;
         return 1;
@@ -957,7 +958,7 @@ finish_towel_change(struct obj *obj, int newspe)
     /* if hero is wielding this towel, don't give "you begin bashing with
        your [wet] towel" message if it's wet, do give one if it's dry */
     if (obj == uwep)
-        g.unweapon = !is_wet_towel(obj);
+        gu.unweapon = !is_wet_towel(obj);
 
     /* description might change: "towel" vs "moist towel" vs "wet towel" */
     if (carried(obj))
@@ -1167,9 +1168,9 @@ enhance_weapon_skill(void)
     int clr = 0;
 
     /* player knows about #enhance, don't show tip anymore */
-    g.context.enhance_tip = TRUE;
+    gc.context.tips[TIP_ENHANCE] = TRUE;
 
-    if (wizard && yn("Advance skills without practice?") == 'y')
+    if (wizard && y_n("Advance skills without practice?") == 'y')
         speedy = TRUE;
 
     do {
@@ -1252,19 +1253,23 @@ enhance_weapon_skill(void)
                 (void) skill_level_name(i, sklnambuf);
                 if (wizard) {
                     if (!iflags.menu_tab_sep)
-                        Snprintf(buf, sizeof(buf), " %s%-*s %-12s %5d(%4d)", prefix,
+                        Snprintf(buf, sizeof buf,
+                                 " %s%-*s %-12s %5d(%4d)", prefix,
                                  longest, P_NAME(i), sklnambuf, P_ADVANCE(i),
                                  practice_needed_to_advance(P_SKILL(i)));
                     else
-                        Snprintf(buf, sizeof(buf), " %s%s\t%s\t%5d(%4d)", prefix, P_NAME(i),
+                        Snprintf(buf, sizeof buf,
+                                 " %s%s\t%s\t%5d(%4d)", prefix, P_NAME(i),
                                  sklnambuf, P_ADVANCE(i),
                                  practice_needed_to_advance(P_SKILL(i)));
                 } else {
                     if (!iflags.menu_tab_sep)
-                        Snprintf(buf, sizeof(buf), " %s %-*s [%s]", prefix, longest,
+                        Snprintf(buf, sizeof buf,
+                                 " %s %-*s [%s]", prefix, longest,
                                  P_NAME(i), sklnambuf);
                     else
-                        Snprintf(buf, sizeof(buf), " %s%s\t[%s]", prefix, P_NAME(i),
+                        Snprintf(buf, sizeof buf,
+                                 " %s%s\t[%s]", prefix, P_NAME(i),
                                  sklnambuf);
                 }
                 any.a_int = can_advance(i, speedy) ? i + 1 : 0;
@@ -1633,7 +1638,7 @@ skill_init(const struct def_skill *class_skill)
     }
 
     /* Set skill for all weapons in inventory to be basic */
-    for (obj = g.invent; obj; obj = obj->nobj) {
+    for (obj = gi.invent; obj; obj = obj->nobj) {
         /* don't give skill just because of carried ammo, wait until
            we see the relevant launcher (prevents an archeologist's
            touchstone from inadvertently providing skill in sling) */
@@ -1670,7 +1675,7 @@ skill_init(const struct def_skill *class_skill)
         P_SKILL(P_BARE_HANDED_COMBAT) = P_BASIC;
 
     /* Roles that start with a horse know how to ride it */
-    if (g.urole.petnum == PM_PONY)
+    if (gu.urole.petnum == PM_PONY)
         P_SKILL(P_RIDING) = P_BASIC;
 
     /*
@@ -1689,7 +1694,7 @@ skill_init(const struct def_skill *class_skill)
 
     /* each role has a special spell; allow at least basic for its type
        (despite the function name, this works for spell skills too) */
-    unrestrict_weapon_skill(spell_skilltype(g.urole.spelspec));
+    unrestrict_weapon_skill(spell_skilltype(gu.urole.spelspec));
 }
 
 void

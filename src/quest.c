@@ -1,4 +1,4 @@
-/* NetHack 3.7	quest.c	$NHDT-Date: 1596498200 2020/08/03 23:43:20 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.29 $ */
+/* NetHack 3.7	quest.c	$NHDT-Date: 1687036547 2023/06/17 21:15:47 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.38 $ */
 /*      Copyright 1991, M. Stephenson             */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -9,7 +9,7 @@
 #include "quest.h"
 
 #define Not_firsttime (on_level(&u.uz0, &u.uz))
-#define Qstat(x) (g.quest_status.x)
+#define Qstat(x) (gq.quest_status.x)
 
 static void on_start(void);
 static void on_locate(void);
@@ -164,7 +164,7 @@ is_pure(boolean talk)
         } else if (u.ualign.record < MIN_QUEST_ALIGN) {
             You("are currently %d and require %d.", u.ualign.record,
                 MIN_QUEST_ALIGN);
-            if (yn_function("adjust?", (char *) 0, 'y') == 'y')
+            if (yn_function("adjust?", (char *) 0, 'y', TRUE) == 'y')
                 u.ualign.record = MIN_QUEST_ALIGN;
         }
     }
@@ -205,7 +205,7 @@ expulsion(boolean seal)
            portal will be deleted as part of arrival on that level.
            If monster movement is in progress, any who haven't moved
            yet will now miss out on a chance to wander through it... */
-        for (t = g.ftrap; t; t = t->ntrap)
+        for (t = gf.ftrap; t; t = t->ntrap)
             if (t->ttyp == MAGIC_PORTAL)
                 break;
         if (t)
@@ -219,19 +219,48 @@ expulsion(boolean seal)
    artifact or you've just thrown it to/at him or her.  If quest
    completion text hasn't been given yet, give it now.  Otherwise
    give another message about the character keeping the artifact
-   and using the magic portal to return to the dungeon. */
+   and using the magic portal to return to the dungeon.  Also called
+   if hero throws or kicks an invocation item (probably the Bell)
+   at the leader. */
 void
-finish_quest(struct obj *obj) /* quest artifact; possibly null if carrying
-                                 Amulet */
+finish_quest(struct obj *obj) /* quest artifact or thrown unique item or faux
+                               * AoY; possibly null if carrying the Amulet */
 {
     struct obj *otmp;
 
-    if (u.uhave.amulet) { /* unlikely but not impossible */
+    if (obj && !is_quest_artifact(obj)) {
+        /* tossed an invocation item (or [fake] AoY) at the quest leader */
+        if (Deaf)
+            return; /* optional (unlike quest completion) so skip if deaf */
+        /* do ID first so that the message identifying the item will refer to
+           it by name (and so justify the ID we already gave...) */
+        fully_identify_obj(obj);
+        /* update_inventory() is not necessary or helpful here because item
+           was thrown, so isn't currently in inventory anyway */
+        if (obj->otyp == AMULET_OF_YENDOR) {
+            qt_pager("hasamulet");
+        } else if (obj->otyp == FAKE_AMULET_OF_YENDOR) {
+            verbalize(
+      "Sorry to say, this is a mere imitation of the true Amulet of Yendor.");
+        } else {
+            verbalize("Ah, I see you've found %s.", the(xname(obj)));
+        }
+        return;
+    }
+
+    if (u.uhave.amulet) {
+        /* has the amulet in inventory -- most likely the player has already
+           completed the quest and stopped in on her way back up, but it's not
+           impossible to have gotten the amulet before formally presenting the
+           quest artifact to the leader. */
         qt_pager("hasamulet");
         /* leader IDs the real amulet but ignores any fakes */
-        if ((otmp = carrying(AMULET_OF_YENDOR)) != 0)
+        if ((otmp = carrying(AMULET_OF_YENDOR)) != (struct obj *) 0) {
             fully_identify_obj(otmp);
+            update_inventory();
+        }
     } else {
+        /* normal quest completion; threw artifact or walked up carrying it */
         qt_pager(!Qstat(got_thanks) ? "offeredit" : "offeredit2");
         /* should have obtained bell during quest;
            if not, suggest returning for it now */
@@ -275,7 +304,7 @@ chat_with_leader(struct monst *mtmp)
     } else if (u.uhave.questart) {
         struct obj *otmp;
 
-        for (otmp = g.invent; otmp; otmp = otmp->nobj)
+        for (otmp = gi.invent; otmp; otmp = otmp->nobj)
             if (is_quest_artifact(otmp))
                 break;
 
@@ -378,6 +407,22 @@ nemesis_speaks(void)
         qt_pager("discourage");
 }
 
+/* create cloud of stinking gas around dying nemesis */
+void
+nemesis_stinks(coordxy mx, coordxy my)
+{
+    boolean save_mon_moving = gc.context.mon_moving;
+
+    /*
+     * Some nemeses (determined by caller) release a cloud of noxious
+     * gas when they die.  Don't make the hero be responsible for such
+     * a cloud even if hero has just killed nemesis.
+     */
+    gc.context.mon_moving = TRUE;
+    create_gas_cloud(mx, my, 5, 8);
+    gc.context.mon_moving = save_mon_moving;
+}
+
 static void
 chat_with_guardian(void)
 {
@@ -396,6 +441,7 @@ prisoner_speaks(struct monst *mtmp)
         /* Awaken the prisoner */
         if (canseemon(mtmp))
             pline("%s speaks:", Monnam(mtmp));
+        SetVoice(mtmp, 0, 80, 0);
         verbalize("I'm finally free!");
         mtmp->mstrategy &= ~STRAT_WAITMASK;
         mtmp->mpeaceful = 1;
@@ -454,8 +500,10 @@ void
 quest_stat_check(struct monst *mtmp)
 {
     if (mtmp->data->msound == MS_NEMESIS)
-        Qstat(in_battle) = (!helpless(mtmp)
-                            && monnear(mtmp, u.ux, u.uy));
+        Qstat(in_battle) = (!helpless(mtmp) && monnear(mtmp, u.ux, u.uy));
 }
+
+#undef Not_firsttime
+#undef Qstat
 
 /*quest.c*/

@@ -86,10 +86,17 @@ steam dragon
 omnibus
 slinky
 maxotaur
+millitaur
 octahedron
 dungeon core
 quale
 holloway
+chiasmus
+giant tetrapod
+voussoir
+barking spider
+frog cloud
+toothsayer
 
 # Quendor (Zork, &c.)
 grue
@@ -450,6 +457,9 @@ fraggle
 
 # Harry Harrison
 stainless steel rat
+
+# The Culture
+antagonistic undecagonstring
 
 # Spoonerism
 mock role

@@ -1,4 +1,4 @@
-/* NetHack 3.7    NetHackW.c    $NHDT-Date: 1596498365 2020/08/03 23:46:05 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.72 $ */
+/* NetHack 3.7    NetHackW.c    $NHDT-Date: 1693359674 2023/08/30 01:41:14 $  $NHDT-Branch: keni-crashweb2 $:$NHDT-Revision: 1.79 $ */
 /* Copyright (C) 2001 by Alex Kompel      */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -53,7 +53,7 @@ Version     _WIN_32IE   Platform/IE
 /*#define COMCTL_URL
  * "http://www.microsoft.com/msdownload/ieplatform/ie/comctrlx86.asp"*/
 
-extern void nethack_exit(int) NORETURN;
+ATTRNORETURN extern void nethack_exit(int) NORETURN;
 static TCHAR *_get_cmd_arg(TCHAR *pCmdLine);
 static HRESULT GetComCtlVersion(LPDWORD pdwMajor, LPDWORD pdwMinor);
 BOOL WINAPI
@@ -123,7 +123,7 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
     windowprocs.win_wait_synch = mswin_wait_synch;
 
     win10_init();
-    early_init();
+    early_init(0, NULL);	/* Change as needed to support CRASHREPORT */
 
     /* init application structure */
     _nethack_app.hApp = hInstance;

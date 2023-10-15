@@ -1,5 +1,5 @@
 \documentstyle[titlepage,longtable]{article}
-% NetHack 3.7  Guidebook.tex $NHDT-Date: 1431192762 2015/12/16 17:32:42 $  $NHDT-Branch: master $:$NHDT-Revision: 1.60 $ */
+% NetHack 3.7  Guidebook.tex $NHDT-Date: 1693084080 2023/08/26 21:08:00 $  $NHDT-Branch: keni-crashweb2 $:$NHDT-Revision: 1.530 $ */
 %+% we're still limping along in LaTeX 2.09 compatibility mode
 %-%\documentclass{article}
 %-%\usepackage{hyperref} % before longtable
@@ -44,9 +44,9 @@
 
 %.au
 \author{Original version - Eric S. Raymond\\
-(Edited and expanded for 3.7 by Mike Stephenson and others)}
+(Edited and expanded for 3.7.0 by Mike Stephenson and others)}
 %DO NOT REMOVE NH_DATESUB \date{DATE(%B %-d, %Y)}
-\date{May 23, 2022}
+\date{September 8, 2023}
 
 \maketitle
 
@@ -451,7 +451,7 @@ Not shown when {\it Normal}.
 %.lp ""
 Encumbrance:
 an indication of how what you are carrying affects your ability to move.
-Values are {\it Unencumbered}, {\it Encumbered}, {\it Stressed},
+Values are {\it Unencumbered}, {\it Burdened}, {\it Stressed},
 {\it Strained}, {\it Overtaxed}, and {\it Overloaded}.
 Not shown when {\it Unencumbered}.
 
@@ -477,7 +477,7 @@ Other conditions and modifiers exist, but there isn't enough room to
 display them with the other status fields.
 \\
 % unindented paragraph
-The {\tt \#doattributes} command (default key {\tt \^{}X} will show
+The {\tt \#attributes} command (default key {\tt \^{}X}) will show
 all current status information in unabbreviated format.
 It also shows other information which might be included on the status
 lines if those had more room.
@@ -747,11 +747,13 @@ It can also be used with the `{\tt $\backslash$}' (known, show a
 list of all discovered objects) and the `{\tt \`{}}' (knownclass,
 show a list of discovered objects in a particular class) commands to offer
 a menu of several sorting alternatives (which sets a new value for the
-{\it sortdiscoveries\/} option).
+{\it sortdiscoveries\/}
+option); also for ``{\tt \#vanquished}'' and ``{\tt \#genocided}'' commands
+to offer a sorting menu.
 \\
 %.lp ""
 A few other commands (eat food, offer sacrifice, apply tinning-kit,
-drink/quaff, dip) use
+drink/quaff, dip, tip container) use
 the `{\tt m}' prefix to skip checking for applicable objects on
 the floor and go straight to checking inventory,
 or (for ``{\tt \#loot}'' to remove a saddle),
@@ -771,18 +773,19 @@ Prefix:  Move until something interesting is found.
 Prefix:  Similar to `{\tt g}', but forking of corridors is not considered
 interesting.
 \\
-Note:  <Control>+<key> means holding the <Control> or <Ctrl> key
-down like <Shift> while typing and releasing <key>, then releasing <Control>.
-Control characters are case-insensitive so {\tt \^{}x} and {\tt \^{}X}
-are the same.
+Note:  {\tt <Control>+<key>} means holding the {\tt <Control>} or
+{\tt <Ctrl>} key down like {\tt <Shift>} while typing and releasing
+{\tt <key>}, then releasing {\tt <Control>}.  {\tt \^{}<key>} is used as
+shorthand elsewhere in the Guidebook to mean the same thing.  Control
+characters are case-insensitive so {\tt \^{}x} and {\tt \^{}X} are the same.
 %.lp
-\item[\tb{M<direction>}]
+\item[\tb{M[yuhjklbn]}]
 Old versions supported `{\tt M}' as a movement prefix which
-combined the effect of `{\tt m}' with {\tt <Control>}+<direction>.
+combined the effect of `{\tt m}' with {\tt <Control>+<direction>}.
 That is no longer supported as a prefix but similar effect can be achieved
-by using {\tt m} and {\tt G}+<direction> in combination.
-{\tt m} can also be used in combination with {\tt g}+<direction>,
-{\tt <Control>}+<direction>, or {\tt <Shift>}+<direction>.
+by using {\tt m} and {\tt G<direction>} in combination.
+{\tt m} can also be used in combination with {\tt g<direction>},
+{\tt <Control>+<direction>}, or {\tt <Shift>+<direction>}.
 %.lp
 \item[\tb{\tt \verb+_+}]
 Travel to a map location via a shortest-path algorithm.\\
@@ -792,8 +795,8 @@ is computed over map locations the hero knows about (e.g. seen or
 previously traversed).
 If there is no known path, a guess is made instead.
 Stops on most of
-the same conditions as the `G' command, but without picking up
-objects, so implicitly forces the `m' prefix.
+the same conditions as the `{\tt G}' command, but without picking up
+objects, so implicitly forces the `{\tt m}' prefix.
 For ports with mouse
 support, the command is also invoked when a mouse-click takes place on a
 location other than the current position.
@@ -840,7 +843,7 @@ For example {\tt d7a} --- drop seven items of object
 Drop several things.\\
 %.lp ""
 In answer to the question\\
-``{\tt What kinds of things do you want to drop? [!\%= BUCXaium]}''\\
+``{\tt What kinds of things do you want to drop? [!\%= BUCXPaium]}''\\
 you should type zero or more object symbols possibly followed by
 `{\tt a}' and/or `{\tt i}' and/or `{\tt u}' and/or `{\tt m}'.
 In addition, one or more of
@@ -860,10 +863,14 @@ the bless\-ed/\-un\-curs\-ed/\-curs\-ed groups may be typed.\\
 %.ei
 %.ed
 The last example shows a combination.
-There are three categories of object filtering: class (`{\tt !}' for
+There are four categories of object filtering: class (`{\tt !}' for
 potions, `{\tt ?}' for scrolls, and so on), shop status (`{\tt u}' for
-unpaid, in other words, owned by the shop), and bless/curse state
-(`{\tt B}', `{\tt U}', `{\tt C}', and `{\tt X}' as shown above).
+unpaid, in other words, owned by the shop), bless/curse state
+(`{\tt B}', `{\tt U}', `{\tt C}', and `{\tt X}' as shown above),
+and novelty (`{\tt P}', recently picked up items; controlled by picking
+up or dropping things rather than by any time factor).
+%.lp ""
+\\
 If you specify more than one value in a category (such as ``{\tt !?}'' for
 potions and scrolls or ``{\tt BU}'' for blessed and uncursed), an inventory
 object will meet the criteria if it matches any of the specified
@@ -962,6 +969,7 @@ a further menu or prompt will appear once you've closed this menu.
 The available options
 are listed later in this Guidebook.  Options are usually set before the
 game rather than with the `{\tt O}' command; see the section on options below.
+Precede {\tt O} with the {\tt m} prefix to show advanced options.
 %.lp
 \item[\tb{\^{}O}]
 Show overview.\\
@@ -1005,7 +1013,7 @@ drinking from a fountain or sink.
 \item[\tb{Q}]
 Select an object for your quiver, quiver sack, or just generally at
 the ready (only one of these is available at a time).  You can then throw
-this (or one of these) using the `f' command.
+this (or one of these) using the `{\tt f}' command.
 %.lp
 \item[\tb{r}]
 Read a scroll or spellbook.
@@ -1016,7 +1024,7 @@ Remove a worn accessory (ring, amulet, or blindfold).\\
 If you're wearing more than one, you'll be prompted for which one to
 remove.  When you're only wearing one, then by default it will be removed
 without asking, but you can set the
-{\it paranoid\verb+_+confirmation\/}
+{\it paranoid\verb+_+confirmation:Remove\/}
 option to require a prompt.\\
 %.lp ""
 This command may also be used to take off armor.  The prompt for which
@@ -1074,7 +1082,7 @@ and/or a shirt, or a suit covering a shirt, as if the underlying items
 weren't there.)
 When you're only wearing one, then by default it will
 be taken off without asking, but you can set the
-{\it paranoid\verb+_+confirmation\/}
+{\it paranoid\verb+_+confirmation:Remove\/}
 option to require a prompt.\\
 %.lp ""
 This command may also be used to remove accessories.  The prompt
@@ -1124,7 +1132,7 @@ via the ``{\tt \#twoweapon}'' extended command.\\
 %.lp ""
 (In versions prior to 3.6 this keystroke ran the command to switch from normal
 play to ``explore mode'', also known as ``discovery mode'', which has now
-been moved to ``{\tt \#exploremode}'' and M-X.)
+been moved to ``{\tt \#exploremode}'' and {\tt M-X}.)
 %.lp
 \item[\tb{\^{}X}]
 Display basic information about your character.\\
@@ -1254,14 +1262,14 @@ You can view the explored portion of the current level's map without
 monsters; without monsters and objects; or without monsters, objects,
 and traps.\\
 %.lp ""
-The <del> key is also shown as <delete> on some keyboards or <rubout>
-on others.
-It is sometimes displayed as \^{}? even though that is not an actual
+The {\tt <del>} key is also shown as {\tt <delete>} on some keyboards or
+{\tt <rubout>} on others.
+It is sometimes displayed as {\tt \^{}?} even though that is not an actual
 control character.\\
 %.lp ""
-Many terminals have an option to swap the <delete> and <backspace> keys,
-so typing the <del> key might not execute this command.
-If that happens, you can use the extended command ``\#terrain'' instead.
+Many terminals have an option to swap the {\tt <delete>} and {\tt <backspace>}
+keys, so typing the {\tt <del>} key might not execute this command.
+If that happens, you can use the extended command ``{\tt \#terrain}'' instead.
 %.lp
 \item[\tb{\#}]
 Perform an extended command.\\
@@ -1335,6 +1343,9 @@ Cast a spell. Default key is `{\tt Z}'.
 \item[\tb{\#chat}]
 Talk to someone. Default key is `{\tt M-c}'.
 %.lp
+\item[\tb{\#chronicle}]
+Show a list of important game events.
+%.lp
 \item[\tb{\#close}]
 Close a door. Default key is `{\tt c}'.
 %.lp
@@ -1343,6 +1354,10 @@ List voluntary challenges you have maintained. Autocompletes.
 Default key is `{\tt M-C}'.\\
 %.lp ""
 See the section below entitled ``Conduct'' for details.
+%.lp
+\item[\tb{\#debugfuzzer}]
+Start the fuzz tester.
+Debug mode only.
 %.lp
 \item[\tb{\#dip}]
 Dip an object into something. Autocompletes. Default key is `{\tt M-d}'.\\
@@ -1393,6 +1408,26 @@ Default key is `{\tt f}'.
 %.lp
 \item[\tb{\#force}]
 Force a lock. Autocompletes. Default key is `{\tt M-f}'.
+%.lp
+\item[\tb{\#genocided}]
+List any monster types which have been genocided.
+In explore mode and debug mode it also shows types which have become
+extinct.
+\\
+%.lp ""
+The display order is the same as is used by {\\tt \#vanquished}.
+The `{\tt m}' prefix brings up a menu of available sorting orders, and
+doing that for either {\\tt \#genocided} or {\\tt \#vanquished} changes the order for both.
+\\
+%.lp ""
+If the sorting order is ``count high to low'' or ``count low to high''
+(which are applicable for {\tt \#vanquished}), that will be ignored
+for {\tt \#genocided} and alphabetical will be used instead.
+The menu omits those two choices when used for {\tt \#genocide}.
+\\
+%.lp ""
+Autocompletes.
+Default key is `{\tt M-g}'.
 %.lp
 \item[\tb{\#glance}]
 Show what type of thing a map symbol corresponds to. Default key is `{\tt ;}'.
@@ -1494,14 +1529,35 @@ Open a door. Default key is `{\tt o}'.
 %.lp
 \item[\tb{\#options}]
 Show and change option settings. Default key is `{\tt O}'.
+Precede with the {\tt m} prefix to show advanced options.
+%.lp
+\item[\tb{\#optionsfull}]
+Show advanced game option settings.
+No default key.
+Precede with the `{\tt m}' prefix to execute the simpler options command.
+(Mainly useful if you use {\tt BINDING=O:optionsfull} to switch
+`{\tt O}' from simple options back to traditional advanced options.)
 %.lp
 \item[\tb{\#overview}]
-Display information you've discovered about the dungeon.  Any visited
-level (unless forgotten due to amnesia) with an annotation is included,
+Display information you've discovered about the dungeon.
+Any visited level
+% [note: amnesia no longer causes levels to be forgotten so exclude this]
+% (unless forgotten due to amnesia)
+with an annotation is included,
 and many things (altars, thrones, fountains, and so on; extra stairs
 leading to another dungeon branch) trigger an automatic annotation.
 If dungeon overview is chosen during end-of-game disclosure, every visited
-level will be included regardless of annotations. Autocompletes.
+level will be included regardless of annotations.
+\\
+%.lp ""
+Precede \#overview with the `{\tt m}' prefix to display the dungeon
+overview as a menu where you can select any visited level to add or
+remove an annotation without needing to return to that level.
+This will also force all visited levels to be displayed rather than just
+the ``interesting'' subset.
+\\
+%.lp ""
+Autocompletes.
 Default keys are `{\tt \^{}O}', and `{\tt M-O}'.
 % DON'T PANIC!
 %.lp
@@ -1525,7 +1581,7 @@ If persistent inventory display is supported and enabled (with the
 {\it perm\verb+_+invent\/} option), interact with it instead of with the map.
 You'll be prompted for menu scrolling keystrokes such
 as `{\tt \verb+>+}' and `{\tt \verb+<+}'.
-Press {\tt RReturn} or {\tt Escape} to resume normal play.
+Press {\tt Return} or {\tt Escape} to resume normal play.
 Default key is {\tt \verb+|+}.
 %.lp
 \item[\tb{\#pickup}]
@@ -1586,12 +1642,12 @@ and also `{\tt \^{}L}' if {\it number\verb+_+pad\/} is on.
 \item[\tb{\#remove}]
 Remove an accessory (ring, amulet, etc). Default key is `{\tt R}'.
 %.lp
-\item[{\bb{\#repeat}}]
+\item[{\tb{\#repeat}}]
 Repeat the previous command.
 Default key is~`{\tt \^{}A}'.
 %.lp
 \item[\tb{\#reqmenu}]
-Prefix key to modify the behaviour or request menu from some commands.
+Prefix key to modify the behavior or request menu from some commands.
 Prevents autopickup when used with movement commands.
 Default key is `{\tt m}'.
 %.lp
@@ -1631,6 +1687,11 @@ otherwise `{\tt 5}' when it is set to 2~or~4.
 Save the game and exit the program.
 Default key is `{\tt S}'.
 %.lp
+\item[\tb{\#saveoptions}]
+Save configuration options to the config file.
+This will overwrite the file, removing all comments, so if you have
+manually edited the config file, don't use this.
+%.lp
 \item[\tb{\#search}]
 Search for traps and secret doors around you. Default key is `{\tt s}'.
 %.lp
@@ -1661,9 +1722,9 @@ Use the shell command `{\tt exit}' to return to the game.
 Default key is `{\tt !}'.
 %.lp
 \item[\tb{\#showgold}]
-Report the gold in your inventory and if you are inside a shop,
-report any credit or debt you have in that shop.
-Does not report on any gold inside containers you're carrying.
+Report the gold in your inventory, including gold you know about in
+containers you're carrying.  If you are inside a shop, report any credit
+or debt you have in that shop.
 Default key is `{\tt \$}'.
 %.lp
 \item[\tb{\#showspells}]
@@ -1719,7 +1780,7 @@ its explored portion.
 In debug mode there are additional choices.\\
 %.lp ""
 Autocompletes.
-Default key is `<del>' or `<delete>' (see {\it Del\/} above).
+Default key is `{\tt <del>}' or `{\tt <delete>}' (see {\it Del\/} above).
 %.lp
 \item[\tb{\#therecmdmenu}]
 Show a menu of possible actions directed at a location next to you.
@@ -1742,8 +1803,20 @@ Debug mode only.
 %.lp
 \item[\tb{\#tip}]
 Tip over a container (bag or box) to pour out its contents.
+When there are containers on the floor, the game will prompt to pick one
+of them or ``tip something being carried''.
+\\
+%.lp ""
+If the latter is chosen, there will be another prompt for which item
+from inventory to tip.
+The `{\tt m}' prefix makes the command skip containers on the
+floor and pick one from inventory, except for the special case of
+{\it menustyle:Traditional\/}
+with two or more containers present; that situation will start with the
+floor container menu.
+\\
+%.lp ""
 Autocompletes. Default key is `{\tt M-T}'.
-The `{\tt m}' prefix makes the command use a menu.
 %.lp
 \item[\tb{\#travel}]
 Travel to a specific location on the map.
@@ -1777,9 +1850,30 @@ In some circumstances it can also be used to rescue trapped monsters.
 Go up a staircase. Default key is `{\tt <}'.
 %.lp
 \item[\tb{\#vanquished}]
-List vanquished monsters.
+List vanquished monsters by type and count.
+\\
+%.lp ""
+Note that the vanquished monsters list includes all monsters killed by
+traps and each other as well as by you, and omits any which got removed
+from the game without being killed (perhaps by genocide, or by a mollified
+shopkeeper dismissing summoned Kops) or were already corpses when placed
+on the map.
+\\
+%.lp ""
+Using the ``request menu'' prefix prior to \#vanquished brings up
+a menu of sorting orders available (provided that the vanquished monsters
+list contains at least two types of monsters).
+Whichever ordering is picked gets assigned to the {\it sortvanquished}
+option so is remembered for subsequent \#vanquished requests.
+The {\tt \#genocided} command shares this sorting order.
+\\
+%.lp ""
+During end-of-game disclosure, when asked whether to show vanquished
+monsters answering `{\tt a}' will let you choose from the sort menu.
+\\
+%.lp ""
 Autocompletes.
-Debug mode only.
+Default key is `{\tt M-V}'.
 %.lp
 \item[\tb{\#version}]
 Print compile time options for this version of {\it NetHack\/}.
@@ -1829,6 +1923,10 @@ Debug mode only.
 \item[\tb{\#wizbury}]
 Bury objects under and around you.
 Autocompletes.
+Debug mode only.
+%.lp
+\item[\tb{\#wizcast}]
+Cast any spell.
 Debug mode only.
 %.lp
 \item[\tb{\#wizdetect}]
@@ -1927,21 +2025,21 @@ letter of the command.
 
 On {\it Windows\/} and {\it MS-DOS\/},
 the `Alt' key can be used in this fashion.
-%% On the {\it Amiga}, set the {\it altmeta\/} option to get this behavior.
 On other systems, if typing `Alt' plus another key transmits a
 two character sequence consisting of an {\tt Escape}
 followed by the other key, you may set the {\it altmeta\/}
-option to have {\it NetHack\/} combine them into meta\+key.
+option to have {\it NetHack\/} combine them into {\tt meta+<key>}.
 (This combining action only takes place when NetHack is expecting a
 command to execute, not when accepting input to name something or to
 make a wish.)
 
 %.pg
-Unlike control characters, where \^x and \^X denote the same thing,
-meta characters are case-sensitive:  M-x and M-X represent different things.
-Some commands which can be run via a meta character require that the
-letter be capitalized because the lower-case equivalent is used for
-another command, so the three key combination meta+shift+letter is needed.
+Unlike control characters, where {\tt \^{}x} and {\tt \^{}X} denote the same
+thing, meta characters are case-sensitive:  {\tt M-x} and {\tt M-X}
+represent different things.  Some commands which can be run via a meta
+character require that the letter be capitalized because the lower-case
+equivalent is used for another command, so the three key combination
+{\tt meta+Shift+letter} is needed.
 
 %.BR 1
 \blist{}
@@ -1972,6 +2070,9 @@ another command, so the three key combination meta+shift+letter is needed.
 %.lp
 \item[\tb{M-f}]
 {\tt\#force}
+%.lp
+\item[\tb{M-g}]
+{\tt\#genocided}
 %.lp
 \item[\tb{M-i}]
 {\tt\#invoke}
@@ -2017,6 +2118,9 @@ another command, so the three key combination meta+shift+letter is needed.
 %.lp
 \item[\tb{M-v}]
 {\tt\#version}
+%.lp
+\item[\tb{M-V}]
+{\tt\#vanquished}
 %.lp
 \item[\tb{M-w}]
 {\tt\#wipe}
@@ -2149,9 +2253,9 @@ A trap usually won't appear on your map until you trigger it by moving
 onto it, you see someone else trigger it, or you discover it with
 the `{\tt s}' (search) command (multiple attempts are often needed;
 if your luck is poor, many attempts might be needed).
-{\it Wands of secret door detection\/} and {\it spell of detect unseen\/}
-also reveal traps within a modest radius but only if the trap is also
-within line-of-sight (whether you can see at the time or not).
+{\it Wands of secret door detection\/} and the spell of {\it detect unseen}
+also reveal traps within a modest radius but only if the trap is also within
+line-of-sight (whether you can see at the time or not).
 There is also other magic which can reveal traps.
 
 %.pg
@@ -2171,11 +2275,14 @@ Other traps can send you to different locations.
 Teleporters send you elsewhere on the same dungeon level.
 Level teleporters send you to a random dungeon level, the destination
 chosen from a few levels lower all the way to the top.
+These traps choose a new destination each time they're activated.
 Trap doors and holes also send you to another level, but one which is
 always below the current level.
 Usually that will be the next level down but it can be farther.
-All of these traps choose a new destination each time they're activated.
-Magic portals also send you to a different level but behave differently.
+Unlike (level) teleporters, the destination level of a particular trap door
+or hole is persistent, so falling into one will bring you to the same level
+each time---though not necessarily the same spot on the level.
+Magic portals behave similarly, but with some additional variation.
 Some portals are two-way and their remote destination is always the same:
 another portal which can take you back.
 Others are one-way and send you to a specific destination level but not
@@ -2183,7 +2290,7 @@ necessarily to a specific location there.
 
 %.pg
 There is a special multi-level branch of the dungeon with pre-mapped levels
-based on the classic computer game ``{\tt Sokoban}.''
+based on the classic computer game ``{\it Sokoban}.''
 In that game, you operate as a warehouse worker who pushes crates around
 obstacles to position them at designated locations.
 In NetHack, the goal is to push boulders into pits or holes until those
@@ -2285,12 +2392,12 @@ find a ``credit card'' in the dungeon, don't bother trying to use it in
 shops; shopkeepers will not accept it.)
 
 %.pg
-The {\tt \$} command, which reports the amount of gold you are carrying
-(in inventory, not inside bags or boxes), will also show current shop
-debt or credit, if any.  The {\tt Iu} command lists unpaid items
-(those which still belong to the shop) if you are carrying any.
-The {\tt Ix} command shows an inventory-like display of any unpaid
-items which have been used up, along with other shop fees, if any.
+The {\tt \$} command, which reports the amount of gold you are carrying,
+will also show current shop debt or credit, if any.
+The {\tt Iu} command lists unpaid items (those which still belong to the
+shop) if you are carrying any.
+The {\tt Ix} command shows an inventory-like display of any unpaid items
+which have been used up, along with other shop fees, if any.
 
 %.hn 3
 \subsubsection*{Shop idiosyncrasies}
@@ -2390,7 +2497,7 @@ spot or a tame one's spot.
 
 %.\" getting away from "Movement feedback" here; oh well...
 %.pg
-The {\tt nopickup} command prefix (default `{\tt m}' is
+The {\tt nopickup} command prefix (default `{\tt m}') is
 also the move-without-attacking prefix and can be used to try to step
 onto a visible monster's spot without the move being considered an attack
 (see the {\it Fighting\/} subsection of {\it Monsters\/} below).
@@ -2465,18 +2572,18 @@ In most circumstances, if you attempt to attack a peaceful monster by
 moving into its location, you'll be asked to confirm your intent.  By
 default an answer of `{\tt y}' acknowledges that intent,
 which can be error prone if you're using `{\tt y}' to move.  You can set the
-{\it paranoid\verb+_+confirmation\/}
+{\it paranoid\verb+_+confirmation:attack\/}
 option to require a response of ``{\tt yes}'' instead.
 %.pg
 
 If you can't see a monster (if it is invisible, or if you are blinded),
-the symbol `I' will be shown when you learn of its presence.
+the symbol `{\tt I}' will be shown when you learn of its presence.
 If you attempt to walk into it, you will try to fight it just like
 a monster that you can see; of course,
 if the monster has moved, you will attack empty air.  If you guess
-that the monster has moved and you don't wish to fight, you can use the `m'
-command to move without fighting; likewise, if you don't remember a monster
-but want to try fighting anyway, you can use the `F' command.
+that the monster has moved and you don't wish to fight, you can use the
+`{\tt m}' command to move without fighting; likewise, if you don't remember
+a monster but want to try fighting anyway, you can use the `{\tt F}' command.
 
 %.hn 2
 \subsection*{Your pet}
@@ -2905,7 +3012,7 @@ weapons or having one of them be stolen or destroyed will also make you
 revert to single-weapon combat.
 
 %.hn 2
-\subsection*{Armor (`{\tt \verb+[+}')}
+\subsection*{Armor (`{\tt [}')}
 
 %.pg
 Lots of unfriendly things lurk about; you need armor to protect
@@ -3027,8 +3134,8 @@ A mail daemon may run up and deliver mail to you as a %
 To use this feature on versions where {\it NetHack\/}
 mail delivery is triggered by electronic mail appearing in your system mailbox,
 you must let {\it NetHack\/} know where to look for new mail by setting the
-``MAIL'' environment variable to the file name of your mailbox.
-You may also want to set the ``MAILREADER'' environment variable to the
+{\tt MAIL} environment variable to the file name of your mailbox.
+You may also want to set the {\tt MAILREADER} environment variable to the
 file name of your favorite reader, so {\it NetHack\/} can shell to it when you
 read the scroll.
 On versions of {\it NetHack\/} where mail is randomly
@@ -3374,8 +3481,8 @@ not violate any food challenges either.
 %.pg
 A strict vegan diet is one which avoids any food derived from animals.
 The primary source of nutrition is fruits and vegetables.  The
-corpses and tins of blobs (`b'), jellies (`j'), and fungi (`F') are
-also considered to be vegetable matter.  Certain human
+corpses and tins of blobs (`{\tt b}'), jellies (`{\tt j}'), and fungi
+(`{\tt F}') are also considered to be vegetable matter.  Certain human
 food is prepared without animal products; namely, lembas wafers, cram
 rations, food rations (gunyoki), K-rations, and C-rations.
 Metal or another normally indigestible material eaten while polymorphed
@@ -3386,7 +3493,7 @@ Note however that eating such items still counts against foodless conduct.
 Vegetarians do not eat animals;
 however, they are less selective about eating animal byproducts than vegans.
 In addition to the vegan items listed above, they may eat any kind
-of pudding (`P') other than the black puddings,
+of pudding (`{\tt P}') other than the black puddings,
 eggs and food made from eggs (fortune cookies and pancakes),
 food made with milk (cream pies and candy bars), and lumps of
 royal jelly.  Monks are expected to observe a vegetarian diet.
@@ -3516,7 +3623,7 @@ in which you might accomplish them.
 \blist{\leftmargin \achwidth \topsep 1mm \itemsep 0mm}
 %.PL Shop
 \item[{\tt <Rank>}]
-Attained rank title <Rank>.
+Attained rank title {\it Rank}.
 \item[{\tt Shop}]
 Entered a shop.
 \item[{\tt Temple}]
@@ -3560,6 +3667,8 @@ Reached the Elemental Planes.
 Reached the Astral Plane level.
 \item[{\tt Blind}]
 Blind from birth.
+\item[{\tt Deaf}]
+Deaf from birth.
 \item[{\tt Nudist}]
 Never wore any armor.
 \item[{\tt Ascended}]
@@ -3577,7 +3686,7 @@ Achievements are recorded and subsequently reported in the order in which
 they happen during your current game rather than the order listed here.
 
 %.pg
-There are nine {\it <Rank>\/} titles for each role, bestowed at experience
+There are nine {\it Rank} titles for each role, bestowed at experience
 levels 1, 3, 6, 10, 14, 18, 22, 26, and 30.
 The one for experience level 1 is not recorded as an achievement.
 Losing enough levels to revert to lower rank(s) does not discard the
@@ -3608,10 +3717,10 @@ enough---but not too close!---to
 the Castle level's drawbridge or can be given to you via prayer boon.
 
 %.pg
-{\it Blind\/} and {\it Nudist\/} are also conducts, and they can only be
-enabled by setting the correspondingly named option in NETHACKOPTIONS
+{\it Blind\/}, {\it Deaf\/}, and {\it Nudist\/} are also conducts, and they can only be
+enabled by setting the correspondingly named option in {\tt NETHACKOPTIONS}
 or run-time configuration file prior to game start.
-In the case of {\it Blind\/}, the option also enforces the conduct.
+In the case of {\it Blind\/} and {\it Deaf\/}, the option also enforces the conduct.
 They aren't really significant accomplishments unless/until you make
 substantial progress into the dungeon.
 
@@ -3630,7 +3739,7 @@ behaves.
 Options may be set in a number of ways.  Within the game, the `{\tt O}'
 command allows you to view all options and change most of them.
 You can also set options automatically by placing them in a configuration
-file, or in the ``NETHACKOPTIONS'' environment variable.
+file, or in the ``{\tt NETHACKOPTIONS}'' environment variable.
 Some versions of {\it NetHack\/} also have front-end programs that allow
 you to set options before starting the game or a global configuration
 for system administrators.
@@ -3644,19 +3753,21 @@ operating systems.\\
 
 %.lp ""
 On UNIX, Linux and macOS it is \mbox{``.nethackrc''} in the user's home
-directory. The file may not exist, but it is a normal ASCII text file and
+directory.
+The file may not exist, but it is a normal ASCII text file and
 can be created with any text editor.\\
 
 %.lp ""
-On Windows, it is \mbox{``.nethackrc''} in the folder
-\mbox{{``\%USERPROFILE\%\textbackslash NetHack\textbackslash 3.7''}}. The
-file may not exist, but it is a normal ASCII text file and can be created
-with any text editor.
+On Windows, the name is \mbox{``.nethackrc''} location in the folder
+\mbox{{``\%USERPROFILE\%\textbackslash NetHack\textbackslash''}}.
+The file may not exist,
+but it is a normal ASCII text file and can be created with any
+text editor.
 After runing {\it NetHack\/} for the first time, you should find a default
 template for ths configuration file named \mbox{``.nethackrc.template''} in
-\mbox{{``\%USERPROFILE\%\textbackslash NetHack\textbackslash 3.7''}}.
-If you had not created the configuration file, {\it NetHack\/} will create
-the configuration file for you using the default template file.
+\mbox{{``\%USERPROFILE\%\textbackslash NetHack\textbackslash''}}.
+If you have not created the configuration file, {\it NetHack\/} will create
+the configuration file for you using the default template file.\\
 
 %.lp ""
 On MS-DOS it is \mbox{``defaults.nh''} in the same folder as
@@ -3761,9 +3872,9 @@ Set exceptions to the {{\it pickup\_types\/}}
 option. See the ``Configuring Autopickup Exceptions'' section.
 %.lp
 \item[\bb{BINDINGS}]
-Change the key bindings of some special keys, menu accelerators, or
-extended commands. You can specify multiple bindings. Format is key
-followed by the command, separated by a colon.
+Change the key bindings of some special keys, menu accelerators,
+extended commands, or mouse buttons. You can specify multiple bindings.
+Format is key followed by the command, separated by a colon.
 See the ``Changing Key Bindings`` section for more information.
 
 %.lp ""
@@ -3877,7 +3988,7 @@ Here is an example of configuration file contents:
 %.BR 2
 
 %.hn 2
-\subsection*{Using the NETHACKOPTIONS environment variable}
+\subsection*{Using the {\tt NETHACKOPTIONS} environment variable}
 
 %.pg
 The NETHACKOPTIONS variable is a comma-separated list of initial
@@ -3950,12 +4061,16 @@ Enable messages about what your character hears (default on).
 Note that this has nothing to do with your computer's audio capabilities.
 Persistent.
 %.lp
-\item[\ib{align}]
+\item[\ib{alignment}]
 Your starting alignment ({\tt align:lawful}, {\tt align:neutral},
-or {\tt align:chaotic}).  You may specify just the first letter.
-The default is to randomly pick an appropriate alignment.
-If you prefix the value with `{\tt !}' or ``{\tt no}'', you will
-exclude that alignment from being picked randomly.
+or {\tt align:chaotic}).
+You may specify just the first letter.
+Many roles and the non-human races restrict which alignments are allowed.
+See {\it role\/}
+for a description of how to use negation to exclude choices.
+%.lp ""
+\\
+Default is random.
 Cannot be set with the `{\tt O}' command.  Persistent.
 %.lp
 \item[\ib{autodescribe}]
@@ -3981,10 +4096,10 @@ See ``{\it pickup\verb+_+types\/}'' and also
 ``{\it autopickup\verb+_+exception\/}'' for ways to refine the behavior.
 \\
 %.lp ""
-Note: prior to version 3.7, the default for {\it autopickup\/} was {\it on}.
+Note: prior to version 3.7.0, the default for {\it autopickup\/} was {\it on}.
 %.lp
 \item[\ib{autoquiver}]
-This option controls what happens when you attempt the `f' (fire)
+This option controls what happens when you attempt the `{\tt f}' (fire)
 command when nothing is quivered or readied (default false).
 When true, the computer will fill
 your quiver or quiver sack or make ready some suitable weapon.
@@ -3992,9 +4107,9 @@ Note that it will not take
 into account the blessed/cursed status, enchantment, damage, or
 quality of the weapon; you are free to manually fill your quiver
 or quiver sack or make ready
-with the `Q' command instead.
+with the `{\tt Q}' command instead.
 If no weapon is found or the option is
-false, the `t' (throw) command is executed instead.  Persistent.
+false, the `{\tt t}' (throw) command is executed instead.  Persistent.
 %.lp
 \item[\ib{autounlock}]
 %\hyphenation{apply\-key}%this needs to be tested...
@@ -4069,10 +4184,6 @@ Synonym for ``{\tt role}'' to pick the type of your character
 Save game state after each level change, for possible recovery after
 program crash (default on).  Persistent.
 %.lp
-\item[\ib{clicklook}]
-Allows looking at things on the screen by navigating the mouse
-over them and clicking the right mouse button (default off).
-%.lp
 \item[\ib{cmdassist}]
 Have the game provide some additional command assistance for new
 players if it detects some anticipated mistakes (default on).
@@ -4083,6 +4194,9 @@ peaceable creatures (default on).  Persistent.
 %.lp
 \item[\ib{dark\verb+_+room}]
 Show out-of-sight areas of lit rooms (default on).  Persistent.
+%.lp
+\item[\ib{deaf}]
+Start the character permanently deaf (default false).  Persistent.
 %.lp
 \item[\ib{disclose}]
 Controls what information the program reveals when the game ends.
@@ -4117,6 +4231,8 @@ lets you refine how it behaves.  Here are the valid prefixes:
 
 The listing of vanquished monsters can be sorted,
 so there are two additional choices for `{\tt v}':
+The listings of vanquished monsters and of genocided types can be sorted,
+so there are two additional choices for `q' and `g':
 %.sd
 %.si
 {\tt ?} --- prompt you and default to ask on the prompt;\\
@@ -4127,8 +4243,9 @@ so there are two additional choices for `{\tt v}':
 Asking refers to picking one of the orderings from a menu.
 The `{\tt +}' disclose without prompting choice,
 or being prompted and answering `{\tt y}' rather than `{\tt a}',
-will default to showing monsters in the traditional order,
-from high level to low level.\\
+will default to showing monsters in the order specified by the
+{\it sortvanquished\/} option.
+\\
 %.lp ""
 Omitted categories are implicitly added with `{\tt n}' prefix.
 Specified categories with omitted prefix implicitly use `{\tt +}' prefix.
@@ -4193,12 +4310,16 @@ melons already exist in {\it NetHack\/}, so don't use those.
 %.lp
 \item[\ib{gender}]
 Your starting gender ({\tt gender:male} or {\tt gender:female}).
-You may specify just the first letter.  Although you can
-still denote your gender using the ``{\tt male}'' and ``{\tt female}''
-options, the ``{\tt gender}'' option will take precedence.
-The default is to randomly pick an appropriate gender.
-If you prefix the value with `{\tt !}' or ``{\tt no}'', you will
-exclude that gender from being picked randomly.
+You may specify just the first letter.
+Although you can
+still denote your gender using either of the deprecated
+``{\it male\/}'' and ``{\it female\/}''
+options, the ``{\it gender\/}'' option will take precedence.
+See {\it role\/}
+for a description of how to use negation to exclude choices.
+%.lp ""
+\\
+Default is random.
 Cannot be set with the `{\tt O}' command.  Persistent.
 %.lp
 \item[\ib{goldX}]
@@ -4291,14 +4412,15 @@ Enable coloring menu lines (default off).
 See ``{\it Configuring Menu Colors\/}'' on how to configure the colors.
 %.lp
 \item[\ib{menustyle}]
-Controls the interface used when you need to choose various objects (in
-response to the Drop command, for instance).
+Controls the method used when you need to choose various objects (in
+response to the {\tt Drop} (aka {\tt droptype}) command, for instance).
 The value specified should be the first letter of one of the following:
 traditional, combination, full, or partial.
+Default is {\tt full}.
 Persistent.
 \\
 %.lp ""
-Traditional was the only interface available for very
+Traditional was the only method available for very
 early versions; it consists of a prompt for object class characters,
 followed by an object-by-object prompt for all items matching the selected
 object class(es).
@@ -4308,6 +4430,9 @@ prompting one-by-one.
 Full displays a menu of
 object classes rather than a character prompt, and then a menu of matching
 objects for selection.
+(Choosing its `A' (Autoselect-All) choice skips the second menu.
+To avoid choosing that by accident,
+set {\it paranoid\verb+_+confirm:AutoAll\/} to require confirmation.)
 Partial skips the object class filtering and
 immediately displays a menu of all objects.
 \item[\ib{menu\verb+_+deselect\verb+_+all}]
@@ -4325,7 +4450,8 @@ Default `\verb+^+'.
 \item[\ib{menu\verb+_+headings}]
 Controls how the headings in a menu are highlighted.
 Values are ``{\tt none}'', ``{\tt bold}'', ``{\tt dim}'',
-``{\tt underline}'', ``{\tt blink}'', or ``{\tt inverse}''.
+``{\tt italic}'', ``{\tt underline}'',``{\tt blink}'', or
+``{\tt inverse}''.
 Not all ports can actually display all types.
 \item[\ib{menu\verb+_+invert\verb+_+all}]
 Key to invert all items in a menu.
@@ -4387,6 +4513,10 @@ Default `{\tt \verb+}+}'.
 %.lp
 \item[\ib{monpolycontrol}]
 Prompt for new form whenever any monster changes shape (default off).
+Debug mode only.
+%.lp
+\item[\ib{montelecontrol}]
+Prompt for destination whenever any monster gets teleported (default off).
 Debug mode only.
 %.lp
 \item[\ib{mouse\verb+_+support}]
@@ -4489,7 +4619,8 @@ are filled in at the end from the previous order.
 %.lp
 \item[\ib{paranoid\verb+_+confirmation}]
 A space separated list of specific situations where alternate
-prompting is desired.  The default is ``{\it paranoid\verb+_+confirmation:pray}''.
+prompting is desired.
+The default is ``{\it paranoid\verb+_+confirmation:pray swim}''.
 %.sd
 %.si
 \newlength{\pcwidth}
@@ -4497,9 +4628,9 @@ prompting is desired.  The default is ``{\it paranoid\verb+_+confirmation:pray}'
 \addtolength{\pcwidth}{\labelsep}
 \blist{\leftmargin \pcwidth \topsep 1mm \itemsep 0mm}
 \item[{\tt Confirm}]
-for any prompts which are set to require ``yes''
-rather than `y', also require ``no'' to reject instead
-of accepting any non-yes response as no;
+for any prompts which are set to require ``yes'' rather than `y',
+also require ``no'' to reject instead of accepting any non-yes response
+as no; changes pray and AutoAll to require ``yes'' or ``no'' too;
 \item[{\tt quit~~~}]
 require ``{\tt yes}'' rather than `{\tt y}' to confirm quitting
 the game or switching into non-scoring explore mode;
@@ -4514,32 +4645,55 @@ require ``{\tt yes}'' rather than `{\tt y}' to confirm attacking
 a peaceful monster;
 \item[{\tt wand-break}]
 require ``{\tt yes}'' rather than `{\tt y}' to confirm breaking
-a wand;
-\item[{\tt eating}]
+a wand with the {\it apply} command;
+\item[{\tt eating~}]
 require ``{\tt yes}'' rather than `{\tt y}' to confirm whether to
 continue eating;
 \item[{\tt Were-change}]
-require ``{\tt yes}'' rather than `{\tt y}' to confirm changing form
-due to lycanthropy
-when hero has polymorph control;
+require ``{\tt yes}'' rather than `{\tt y}' to confirm changing form due
+to lycanthropy when hero has polymorph control;
 \item[{\tt pray~~~}]
 require `{\tt y}' to confirm an attempt to pray rather
 than immediately praying; on by default;
-\item[{\tt Remove~}] require selection from inventory for `{\tt R}'
-and `{\tt T}'
-commands even when wearing just one applicable item.
+(to require ``yes'' rather than just `y', set Confirm too);
+\item[{\tt trap~~~}]
+require `{\tt y}' to confirm an attempt to move into or onto a known trap,
+unless doing so is considered to be harmless;
+(to require ``yes'' rather than just `y', set Confirm too);
+confirmation can be skipped by using the `{\tt m}' movement prefix;
 \item[{\tt swim~~~}]
-prevent walking into water or lava.
+prevent walking into water or lava; on by default; (to deliberately step
+onto/into such terrain when this is set, use the `{\tt m}'
+movement prefix when adjacent);
+\item[{\tt AutoAll}]
+require confirmation when the `A' (Autoselect-All) choice is selected
+in object class filtering menus for {\it menustyle:Full};
+(to require ``yes'' rather than just `y', set Confirm too);
+\item[{\tt Remove~}]
+require selection from inventory for `{\tt R}' and `{\tt T}'
+commands even when wearing just one applicable item;
 \item[{\tt all~~~~}]
 turn on all of the above.
 \elist
 %.ei
 %.ed
-By default, the pray choice is enabled, the others disabled.
-To disable it without setting
-any of the other choices, use ``{\it paranoid\verb+_+confirmation:none}''.  To keep
-it enabled while setting any of the others, include it in the list,
-such as ``{\it par\-a\-noid\verb+_+con\-fir\-ma\-tion:attack~pray~Remove}''.
+By default, the pray and swim choices are enabled, the others disabled.
+To disable them without setting
+any of the other choices, use ``{\it paranoid\verb+_+confirmation:none}''.
+To keep them enabled while setting any of the others, you can
+include them in the list, such as
+``{\it par\-a\-noid\verb+_+con\-fir\-ma\-tion:attack~pray~swim~Remove\/}''
+or you can precede the first entry in the list with a plus sign,
+``{\it paranoid\verb+_+confirmation:\verb|+|attack~Remove\/}''.
+To remove an entry that has been previously set without removing others,
+precede the first entry in the list with a minus sign,
+``{\it paranoid\verb+_+confirmation:-swim\/}.
+To both add some new entries and remove some old ones, you can use
+mulitple {\it paranoid\verb+_+confirmation\/} option settings, or you can
+use the `{\tt \verb|+|}' form and list entries to be added by their name
+and entries to be removed by `{\tt !}' and name.
+The positive (no `!') and negative (with `!') entries
+can be intermixed.
 %.lp
 \item[\ib{perm\verb+_+invent}]
 If true, always display your current inventory in a window.  This only
@@ -4644,9 +4798,9 @@ it when not allowed or not possible results in explore mode instead.
 Default is normal play.
 %.lp
 \item[\ib{pushweapon}]
-Using the `w' (wield) command when already wielding
+Using the `{\tt w}' (wield) command when already wielding
 something pushes the old item into your alternate weapon slot (default off).
-Likewise for the `a' (apply) command if it causes the applied item to
+Likewise for the `{\tt a}' (apply) command if it causes the applied item to
 become wielded.  Persistent.
 %.lp
 \item[\ib{quick\verb+_+farsight}]
@@ -4659,9 +4813,13 @@ objects or monsters is less intrusive.
 Default is off.  Persistent.
 %.lp
 \item[\ib{race}]
-Selects your race (for example, ``{\tt race:human}'').  Default is random.
-If you prefix the value with `{\tt !}' or ``{\tt no}'', you will
-exclude that race from being picked randomly.
+Choices are {\tt human}, {\tt dwarf}, {\tt elf}, {\tt gnome}, and
+{\tt orc} but most roles restrict which of the non-human races are allowed.
+See {\it role\/}
+for a description of how to use negation to exclude choices.
+%.lp ""
+\\
+Default is random.
 Cannot be set with the `{\tt O}' command.  Persistent.
 %.lp
 \item[\ib{rest\verb+_+on\verb+_+space}]
@@ -4670,12 +4828,33 @@ Persistent.
 %.lp
 \item[\ib{role}]
 Pick your type of character (for example, ``{\tt role:Samurai}'');
-synonym for ``{\it character\/}''.  See ``{\it name\/}'' for an alternate method
-of specifying your role.  Normally only the first letter of the
-value is examined; `r' is an exception with ``{\tt Rogue}'', ``{\tt Ranger}'',
-and ``{\tt random}'' values.
-If you prefix the value with `{\tt !}' or ``{\tt no}'', you will
-exclude that role from being picked randomly.
+synonym for ``{\it character\/}''.
+See ``{\it name\/}'' for an alternate method of specifying your role.
+%.\" Normally only the first letter of the
+%.\" value is examined; `r' is an exception with ``{\tt Rogue}'',
+%.\" ``{\tt Ranger}'', and ``{\tt random}'' values.
+%.lp ""
+This option can also be used to limit selection when role is chosen
+randomly.
+Use a space-separated list of roles and either negate each one or negate
+the option itself instead.
+Negation is accomplished in the same manner as with {\it boolean options\/},
+by prefixing the option or its value(s) with `{\tt \verb+!+}' or ``{\tt no}''.
+%.BR 0
+\\
+Examples:
+\\
+\begin{verbatim}
+OPTIONS=role:!arc !bar !kni
+OPTIONS=!role:arc bar kni
+\end{verbatim}
+There can be multiple instances of the {\it role\/}
+option if they're all negations.
+%.\" Only one positive value is allowed, and if present, it overrides any
+%.\" negations.
+%.lp ""
+\\
+Default is random.
 Cannot be set with the `{\tt O}' command.  Persistent.
 %.lp
 \item[\ib{roguesymset}]
@@ -4750,20 +4929,18 @@ Persistent.
 \\
 %.lp ""
 The possible values are:
-%.PS o
-%.PL o
+\\
+%.PS
 {\tt o} --- list object types by class, in discovery order within each class;
 default;
-%.PL s
+\\
 {\tt s} --- list object types by {\it sortloot\/}
 classification: by class, by sub-class within class for classes which
 have substantial groupings (like helmets, boots, gloves, and so forth
 for armor), with object types partly-discovered via assigned name coming
 before fully identified types;
 \\
-%.PL c
 {\tt c} --- list by class, alphabetically within each class;\\
-%.PL a
 {\tt a} --- list alphabetically across all classes.\\
 %.PE
 Can be interactively set via the `{\tt O}' command or via using
@@ -4775,6 +4952,7 @@ Controls the sorting behavior of pickup lists for inventory
 and \#loot commands and some others.  Persistent.
 \\
 The possible values are:
+\\
 %.sd
 %.si
 {\tt full} --- always sort the lists;\\
@@ -4787,6 +4965,50 @@ The possible values are:
 \item[\ib{sortpack}]
 Sort the pack contents by type when displaying inventory (default on).
 Persistent.
+%.lp
+\item[\tb{sortvanquished}]
+Controls the sorting behavior for the output of the {\tt \#vanquished} command
+and also for the {\tt \#genocided} command.
+Persistent.
+\\
+%.lp ""
+The possible values are:
+\\
+%.PS
+{\tt t} ---
+traditional: order by monster level; ties are broken by internal
+monster index;
+default;
+\\
+{\tt d} ---
+order by monster difficulty rating; ties broken by internal index;
+\\
+{\tt a} ---
+order alphabetically, first any unique monsters then all the others;
+\\
+%note: 'A' and 'C' can be set in RC file or NETHACKOPTIONS but not by 'O'
+% {\tt A} ---
+% order alphabetically, unique monsters intermixed with other monsters;
+% \\
+% {\tt C} ---
+% order by monster class, by high to low level within each class;
+% \\
+{\tt c} ---
+order by monster class, by low to high level within each class;
+\\
+{\tt n} ---
+order by count, high to low; ties are broken by internal monster index;
+\\
+{\tt z} ---
+order by count, low to high; ties broken by internal index.
+\\
+%.PE
+Can be interactively set via the `{\tt m O}' command or via using
+the `{\tt m}' prefix before either the {\tt \#vanquished} command
+or the {\tt \#genocided} command.
+%.lp
+\item[\ib{sounds}]
+Allow sounds to be emitted from an integrated sound library (default on).
 %.lp
 \item[\ib{sparkle}]
 Display a sparkly effect when a monster (including yourself) is hit by an
@@ -4820,8 +5042,11 @@ Show the elapsed game time in turns on bottom line (default off).  Persistent.
 When pausing momentarily for display effect, such as with explosions and
 moving objects, use a timer rather than sending extra characters to the
 screen.  (Applies to ``tty'' and ``curses'' interfaces only; ``X11'' interface always
-uses a timer based delay.  The default is on if configured into the
+uses a timer-based delay.  The default is on if configured into the
 program.)  Persistent.
+%.lp
+\item[\ib{tips}]
+Show some helpful tips during gameplay (default on).  Persistent.
 %.lp
 \item[\ib{tombstone}]
 Draw a tombstone graphic upon your death (default on).  Persistent.
@@ -4842,6 +5067,10 @@ command.  Persistent.
 % \item[ib{travel\verb+_+debug}]
 % Display intended path during each step of travel (default off).
 % Debug mode only.
+%.lp
+\item[\ib{tutorial}]
+Play a tutorial level at the start of the game.
+Setting this option on or off in the config file will skip the query.
 %.lp
 \item[\ib{verbose}]
 Provide more commentary during the game (default on).  Persistent.
@@ -5064,7 +5293,7 @@ Acceptable values are {\tt 2} and {\tt 3} (default is {\tt 2}).
 When set to {\tt 3}, the {\tt tty} interface moves some fields around and
 mainly shows status conditions on their own line.
 A display capable of showing at least 25 lines is recommended.
-The value can be toggled back and forth during the game with the `O'
+The value can be toggled back and forth during the game with the `{\tt O}'
 command.
 
 %.lp ""
@@ -5084,6 +5313,11 @@ original format, with the status window spread out vertically.
 A value of {\tt 2} makes status be slightly condensed, moving some
 fields to different lines to eliminate one whole line, reducing the
 height needed.
+(If NetHack has been built using a version of {\tt Qt}
+older than {\tt qt-5.9},
+{\it statuslines\/}
+can only be set in the run-time configuration file or via NETHACKOPTIONS,
+not during play with the `{\tt O}' command.)
 %.lp
 \item[\ib{term\verb+_+cols} {\normalfont and}]
 %.lp
@@ -5198,13 +5432,13 @@ or ports to customize and change the port behavior.
 \item[\ib{altkeyhandling}]
 Select an alternate way to handle keystrokes ({\it Win32 tty\/ NetHack\/} only).
 The name of the handling type is one of {\it default}, {\it ray}, {\it 340}
+%.\" \item[\ib{altmeta}]
+%.\" On Amiga, this option controls whether typing ``Alt'' plus another key
+%.\" functions as a meta-shift for that key (default on).
 %.lp
 \item[\ib{altmeta}]
-On Amiga, this option controls whether typing ``Alt'' plus another key
-functions as a meta-shift for that key (default on).
-%.lp
-\item[\ib{altmeta}]
-On other (non-Amiga) systems where this option is available, it can be
+%.\" On other (non-Amiga) systems where this option is available, it can be
+On systems where this option is available, it can be
 set to tell {\it NetHack\/} to convert a two character sequence beginning with
 ESC into a meta-shifted version of the second character (default off).
 
@@ -5223,15 +5457,6 @@ At other prompts a single ESC suffices.
 Use BIOS calls to update the screen display quickly and to read the keyboard
 (allowing the use of arrow keys to move) on machines with an IBM PC
 compatible BIOS ROM (default off, {\it OS/2, PC\/ {\rm and} ST NetHack\/} only).
-%.lp
-\item[\ib{flush}]
-(default off, {\it Amiga NetHack \/} only).
-%.lp
-\item[\ib{Macgraphics}]
-(default on, {\it Mac NetHack \/} only).
-%.lp
-\item[\ib{page\verb+_+wait}]
-(default off, {\it Mac NetHack \/} only).
 %.lp
 \item[\ib{rawio}]
 Force raw (non-cbreak) mode for faster output and more
@@ -5361,11 +5586,11 @@ autopickup.
 
 %.pg
 It is possible to change the default key bindings of some special commands,
-menu accelerator keys, and extended commands, by using BIND stanzas in the
+menu accelerator keys, extended commands, by using BIND stanzas in the
 configuration file. Format is key, followed by the command to bind to,
 separated by a colon. The key can be a single character (``{\tt x}''),
 a control key (``{\tt \^{}X}'', ``{\tt C-x}''), a meta key (``{\tt M-x}''),
-or a three-digit decimal ASCII code.
+a mouse button, or a three-digit decimal ASCII code.
 
 %.pg
 For example:
@@ -5389,6 +5614,11 @@ The menu control or accelerator keys can also be rebound via OPTIONS lines
 in the configuration file.
 You cannot bind object symbols or selection letters into menu accelerators.
 Some interfaces only support some of the menu accelerators.
+
+%.lp "Mouse buttons"
+\item[\tb{Mouse buttons}]
+You can bind ``mouse1'' or ``mouse2'' to ``{\tt nothing}'',
+``{\tt therecmdmenu}'', ``{\tt clicklook}'', or ``{\tt mouseaction}''.
 
 %.lp "Special command keys"
 \item[\tb{Special command keys}]
@@ -5621,8 +5851,8 @@ And {\it no-color}, the default foreground color, which isn't necessarily
 the same as any of the other colors.
 
 %.lp ""
-Allowed attributes are {\it none}, {\it bold}, {\it dim}, {\it underline},
-{\it blink}, and {\it inverse}.
+Allowed attributes are {\it none}, {\it bold}, {\it dim}, {\it italic},
+{\it underline},{\it blink}, and {\it inverse}.
 {\it Normal\/} is a synonym for {\it none}.
 Note that the platform used may interpret the attributes any way it
 wants.
@@ -5677,7 +5907,7 @@ Each SOUND entry is broken down into the following parts:
 
 %.sd
 %.si
-{\tt MESG       } --- message window mapping (the only one supported in 3.7);\\
+{\tt MESG       } --- message window mapping (the only one supported in 3.7.0);\\
 {\tt msgtype    } --- optional; message type to use, see ``Configuring User Sounds''\\
 {\tt pattern    } --- the pattern to match;\\
 {\tt sound file } --- the sound file to play;\\
@@ -5693,7 +5923,7 @@ The pattern should be a POSIX extended regular expression.
 For example:
 
 \begin{verbatim}
-    SOUNDDIR=C:\\nethack\\sounds
+    SOUNDDIR=C:\nethack\sounds
     SOUND=MESG "This door is locked" "lock.wav" 100
     SOUND=MESG hide "^You miss the " "swing.wav" 75
 \end{verbatim}
@@ -5791,6 +6021,11 @@ for stone through termill, `minor\_troubles' for blind through hallu,
 %.lp ""
 Allowed behaviors are ``always'', ``up'', ``down'', ``changed'', a
 percentage or absolute number threshold, or text to match against.
+For the {\it hitpoints\/} field, the additional behavior ``criticalhp''
+is available.
+It overrides other behavior rules if
+hit points are at or below the {\it major problem\/} threshold
+(which varies depending upon maximum hit points and experience level).
 
 \blist{}
 %.lp "*"
@@ -5843,7 +6078,14 @@ it also matches when value is below or above.
 If the prefix is `{\tt <}' or `{\tt >}', only match when strictly
 above or below.
 %.lp "*"
-\item[{\tt text}] match sets the attribute when the field value matches the text.
+\item[{\tt criticalhp}] only applies to the hitpoints field and only
+when current hit points are below a threshold (which varies by maximum
+hit points and experience level).
+When the threshold is met, a criticalhp rule takes precedence over all
+other hitpoints rules.
+%.lp "*"
+\item[{\tt text}] match sets the attribute when the field value
+matches the text.
 Text matches can only be used for ``{\it alignment\/}'',
 ``{\it carrying-capacity\/}'', ``{\it hunger\/}'', ``{\it dungeon-level\/}'',
 and ``{\it title\/}''.
@@ -5997,6 +6239,7 @@ Default                      & Symbol Name                & Description\\
 \verb@K@ & S\verb+_+kop                     &	(Keystone Kop)\\
 \verb@^@ & S\verb+_+land\verb+_+mine              &	(land mine)\\
 \verb@}@ & S\verb+_+lava                    &	(molten lava)\\
+\verb@}@ & S\verb+_+lavawall                &	(wall of lava)\\
 \verb@l@ & S\verb+_+leprechaun              &	(leprechaun)\\
 \verb@^@ & S\verb+_+level\verb+_+teleporter       &	(level teleporter)\\
 \verb@L@ & S\verb+_+lich                    &	(lich)\\
@@ -6137,8 +6380,8 @@ character sequences and explicit 24-bit red-green-blue colors in order for the g
 representation to be visible as specified.
 
 For example, the following line in your configuration file will cause
-the glyph representation for glyphid G\verb+_+pool to use Unicode codepoint U+224B
-and the color represented by R-G-B value 0-0-160:\\
+the glyph representation for glyphid G\verb+_+pool to use Unicode codepoint
+U+224B and the color represented by R-G-B value 0-0-160:\\
 \begin{verbatim}
 OPTIONS=glyph:G_pool/U+224B/0-0-160
 \end{verbatim}
@@ -6161,8 +6404,8 @@ display of the customizations, such as the Enhanced symset.
 
 %.pg
 {\it NetHack\/} can be set up to use only standard ASCII characters for making
-maps of the dungeons. This makes the MS-DOS versions of {\it NetHack\/}
-completely
+maps of the dungeons. This makes even the MS-DOS versions of {\it NetHack}
+(which use special line-drawing characters by default) completely
 accessible to the blind who use speech and/or Braille access technologies.
 Players will require a good working knowledge of their screen-reader's
 review features, and will have to know how to navigate horizontally and
@@ -6177,16 +6420,16 @@ gives you the row and column of your review cursor and the PC cursor.
 These co-ordinates are often useful in giving players a better sense of the
 overall location of items on the screen.
 %.pg
-{\it NetHack\/} can also be compiled with support for sending the game messages
-to an external program, such as a text-to-speech synthesizer. If the
-``{\tt \#version}'' extended command shows ``external program as a
+{\it NetHack\/} can also be compiled with support for sending the game
+messages to an external program, such as a text-to-speech synthesizer. If
+the ``{\tt \#version}'' extended command shows ``external program as a
 message handler'', your {\it NetHack\/}
 has been compiled with the capability. When compiling {\it NetHack\/}
 from source
-on Linux and other POSIX systems, define {\it MSGHANDLER\/} to enable it.
+on Linux and other POSIX systems, define {\tt MSGHANDLER\/} to enable it.
 To use
-the capability, set the environment variable {\it NETHACK\_MSGHANDLER\/} to an
-executable, which will be executed with the game message as the program's
+the capability, set the environment variable {\tt NETHACK\_MSGHANDLER\/} to
+an executable, which will be executed with the game message as the program's
 only parameter.
 %.pg
 
@@ -6324,6 +6567,10 @@ Minimum number of points to get an entry in the score file.
 0 or 1 to use user names or numeric userids, respectively, to identify
 unique people for the score file.
 %.lp
+\item[\ib{HIDEUSAGE}]
+0 or 1 to control whether the help menu entry for command
+line usage is shown or suppressed.
+%.lp
 \item[\ib{MAX\verb+_+STATUENAME\verb+_+RANK}]
 Maximum number of score file entries to use for
 random statue names (default is 10).
@@ -6366,6 +6613,13 @@ Only relevant if the program was built with LIVELOG enabled.
 When available, it should be left commented out on single player
 installations because over time the file could grow to be extremely
 large unless it is actively maintained.
+%.lp
+\item[\ib{CRASHREPORTURL}]
+If set to
+{\tt https://www.nethack.org/common/contact.html}
+and support is compiled in, brings up a browser window populated with
+the information needed to report a problem if the game panics or ends
+up in an internally inconsistent state.
 \elist
 
 %.hn 1
@@ -6830,7 +7084,7 @@ operate on various UNIX flavors and maintained the X11 interface.
 %.pg
 \medskip
 {\it Ken Lorber}, {\it Haoyang Wang}, {\it Pat Rankin}, and {\it Dean Luick}
-maintained the port of {\it NetHack\/} 3.6 for Mac OSX.
+maintained the port of {\it NetHack\/} 3.6 for MacOS.
 
 %.pg
 \medskip
@@ -6892,6 +7146,11 @@ and a small number of bug fixes.
 %.pg
 \medskip
 NetHack 3.6.6 was released on March 8, 2020 containing a security fix and
+some bug fixes.
+
+%.pg
+\medskip
+NetHack 3.6.7 was released on February 16, 2023 containing a security fix and
 some bug fixes.
 
 %.pg

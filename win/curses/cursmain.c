@@ -22,6 +22,22 @@ extern char erase_char, kill_char;
 
 extern long curs_mesg_suppress_seq; /* from cursmesg.c */
 extern boolean curs_mesg_no_suppress; /* ditto */
+extern int mesg_mixed;
+extern glyph_info mesg_gi;
+
+#ifndef CURSES_GENL_PUTMIXED
+#if defined(PDC_WIDE) || defined(NCURSES_WIDECHAR)
+#define USE_CURSES_PUTMIXED
+#else  /* WIDE */
+#ifdef NH_PRAGMA_MESSAGE
+#ifdef _MSC_VER
+#pragma message ("Curses wide support not defined so NetHack curses message window functionality reduced")
+#else
+#pragma message "Curses wide support not defined so NetHack curses message window functionality reduced"
+#endif /* _MSC_VER */
+#endif /* NH_PRAGMA_MESSAGE */
+#endif /* WIDE */
+#endif /* CURSES_GENL_PUTMIXED */
 
 /* stubs for curses_procs{} */
 #ifdef POSITIONBAR
@@ -70,7 +86,11 @@ struct window_procs curses_procs = {
     curses_destroy_nhwindow,
     curses_curs,
     curses_putstr,
+#ifdef USE_CURSES_PUTMIXED
+    curses_putmixed,
+#else
     genl_putmixed,
+#endif
     curses_display_file,
     curses_start_menu,
     curses_add_menu,
@@ -150,15 +170,39 @@ init_nhwindows(int* argcp, char** argv)
                 ** windows?  Or at least all but WIN_INFO?      -dean
 */
 void
-curses_init_nhwindows(int *argcp UNUSED,
-                      char **argv UNUSED)
+curses_init_nhwindows(
+    int *argcp UNUSED,
+    char **argv UNUSED)
 {
 #ifdef PDCURSES
     char window_title[BUFSZ];
 #endif
+#ifdef CURSES_UNICODE
+#ifdef PDCURSES
+    static char pdc_font[BUFSZ] = "";
+#endif
+#endif
 
 #ifdef CURSES_UNICODE
     setlocale(LC_CTYPE, "");
+#ifdef PDCURSES
+    /* Assume the DOSVGA port of PDCursesMod, or the SDL1 or SDL2 port of
+       either PDCurses or PDCursesMod. Honor the font_map option to set
+       a font.
+       On MS-DOS, if no font_map is set, use ter-u16v.psf if it is present.
+       PDC_FONT has no effect on other PDCurses or PDCursesMod ports. */
+    if (iflags.wc_font_map && iflags.wc_font_map[0]) {
+        Snprintf(pdc_font, sizeof(pdc_font), "PDC_FONT=%s",
+                 iflags.wc_font_map);
+#ifdef MSDOS
+    } else if (access("ter-u16v.psf", R_OK) >= 0) {
+        Snprintf(pdc_font, sizeof(pdc_font), "PDC_FONT=ter-u16v.psf");
+#endif
+    }
+    if (pdc_font[0] != '\0') {
+        putenv(pdc_font);
+    }
+#endif
 #endif
 
 #ifdef XCURSES
@@ -247,14 +291,21 @@ curses_init_nhwindows(int *argcp UNUSED,
     curses_display_splash_window();
 }
 
-/* Do a window-port specific player type selection. If player_selection()
-   offers a Quit option, it is its responsibility to clean up and terminate
-   the process. You need to fill in pl_character[0].
-*/
+/* Use the general role/race/&c selection originally implemented for tty. */
 void
 curses_player_selection(void)
 {
+#if 1
+    if (genl_player_setup(0))
+        return; /* success */
+
+    /* quit/cancel */
+    curses_bail((const char *) NULL);
+    /*NOTREACHED*/
+#else
+    /* still present cursinit.c but no longer used */
     curses_choose_character();
+#endif
 }
 
 
@@ -274,9 +325,9 @@ curses_askname(void)
         }
 #endif /* SELECTSAVED */
 
-    curses_line_input_dialog("Who are you?", g.plname, PL_NSIZ);
-    (void) mungspaces(g.plname);
-    if (!g.plname[0] || g.plname[0] == '\033')
+    curses_line_input_dialog("Who are you?", gp.plname, PL_NSIZ);
+    (void) mungspaces(gp.plname);
+    if (!gp.plname[0] || gp.plname[0] == '\033')
          goto bail;
 
     iflags.renameallowed = TRUE; /* tty uses this, we don't [yet?] */
@@ -418,9 +469,11 @@ curses_display_nhwindow(winid wid, boolean block)
 {
     menu_item *selected = NULL;
 
+    if (wid == WIN_ERR)
+        return;
     if (curses_is_menu(wid) || curses_is_text(wid)) {
         curses_end_menu(wid, "");
-        curses_select_menu(wid, PICK_NONE, &selected);
+        (void) curses_select_menu(wid, PICK_NONE, &selected);
         return;
     }
 
@@ -528,6 +581,44 @@ curses_putstr(winid wid, int attr, const char *text)
 
     /* urgent message handling is a one-shot operation; we're done */
     curs_mesg_no_suppress = FALSE;
+}
+
+void
+curses_putmixed(winid window, int attr, const char *str)
+{
+    const char *substr = 0;
+    char buf[BUFSZ];
+    boolean done_output = FALSE;
+#ifdef ENHANCED_SYMBOLS
+    int utf8flag = 0;
+#endif
+
+    if (window == WIN_MESSAGE) {
+        str = mixed_to_glyphinfo(str, &mesg_gi);
+        mesg_mixed = 1;
+    } else {
+        if ((substr = strstri(str, "\\G")) != 0) {
+#ifdef ENHANCED_SYMBOLS
+            if ((windowprocs.wincap2 & WC2_U_UTF8STR) && SYMHANDLING(H_UTF8)) {
+                mixed_to_utf8(buf, sizeof buf, str, &utf8flag);
+            } else {
+#endif
+                decode_mixed(buf, str);
+#ifdef ENHANCED_SYMBOLS
+            }
+#endif
+            /* now send buf to the normal putstr */
+            curses_putstr(window, attr, buf);
+            done_output = TRUE;
+	}
+    }
+
+    if (!done_output) {
+        /* just send str to the normal putstr */
+        curses_putstr(window, attr, str);
+    }
+    if (window == WIN_MESSAGE)
+        mesg_mixed = 0;
 }
 
 /* Display the file named str.  Complain about missing files
@@ -678,16 +769,25 @@ curses_update_inventory(int arg)
     }
 
     /* skip inventory updating during character initialization */
-    if (!g.program_state.in_moveloop && !g.program_state.gameover)
+    if (!gp.program_state.in_moveloop && !gp.program_state.gameover)
         return;
 
     if (!arg) {
+         /* if perm_invent is just being toggled on, we need to run the
+            update twice; the first time creates the window and organizes
+            the screen to fit it in, the second time populates it;
+            needed if we're called from docrt() because the "organizes
+            the screen" part calls docrt() and that skips recursive calls */
+         boolean no_inv_win_yet = !curses_get_nhwin(INV_WIN);
+
         /* Update inventory sidebar.  NetHack uses normal menu functions
            when gathering the inventory, and we don't want to change the
            underlying code.  So instead, track if an inventory update is
            being performed with a static variable. */
         inv_update = 1;
         curs_update_invt(0);
+        if (no_inv_win_yet)
+            curs_update_invt(0);
         inv_update = 0;
     } else {
         /* perform scrolling operations on persistent inventory window */
@@ -706,12 +806,16 @@ curses_ctrl_nhwindow(
 
 /*
 mark_synch()    -- Don't go beyond this point in I/O on any channel until
-                   all channels are caught up to here.  Can be an empty call
-                   for the moment
+                   all channels are caught up to here.
 */
 void
 curses_mark_synch(void)
 {
+     /* full refresh has unintended side-effect of making a menu window
+        that has called core's get_count() to vanish; do a basic screen
+        refresh instead */
+     /*curses_refresh_nethack_windows();*/
+     refresh();
 }
 
 /*
@@ -723,6 +827,9 @@ wait_synch()    -- Wait until all pending output is complete (*flush*() for
 void
 curses_wait_synch(void)
 {
+    if (curses_got_output())
+        (void) curses_more();
+    curses_mark_synch();
     /* [do we need 'if (counting) curses_count_window((char *)0);' here?] */
 }
 
@@ -773,7 +880,7 @@ curses_print_glyph(
     winid wid,
     coordxy x, coordxy y,
     const glyph_info *glyphinfo,
-    const glyph_info *bkglyphinfo UNUSED)
+    const glyph_info *bkglyphinfo)
 {
     int glyph;
     int ch;
@@ -806,9 +913,12 @@ curses_print_glyph(
             else /* if (iflags.use_inverse) */
                 attr = A_REVERSE;
         }
-        /* water and lava look the same except for color; when color is off,
-           render lava in inverse video so that they look different */
-        if ((special & (MG_BW_LAVA | MG_BW_ICE)) != 0 && iflags.use_inverse) {
+        /* water and lava look the same except for color; when color is off
+           (checked by core), render lava in inverse video so that it looks
+           different from water; similar for floor vs ice, fountain vs sink,
+           and corridor vs engranving-in-corridor */
+        if ((special & (MG_BW_LAVA | MG_BW_ICE | MG_BW_SINK | MG_BW_ENGR))
+            != 0 && iflags.use_inverse) {
             /* reset_glyphmap() only sets MG_BW_foo if color is off */
             attr = A_REVERSE;
         }
@@ -822,12 +932,15 @@ curses_print_glyph(
     if (SYMHANDLING(H_UTF8)
         && glyphinfo->gm.u
         && glyphinfo->gm.u->utf8str) {
-        curses_putch(wid, x, y, ch, glyphinfo->gm.u, color, attr);
+        curses_putch(wid, x, y, ch, glyphinfo->gm.u, color,
+                     bkglyphinfo->framecolor, attr);
     } else {
-        curses_putch(wid, x, y, ch, NULL, color, attr);
+        curses_putch(wid, x, y, ch, NULL, color,
+                     bkglyphinfo->framecolor, attr);
     }
 #else
-    curses_putch(wid, x, y, ch, color, attr);
+    curses_putch(wid, x, y, ch, color,
+                 bkglyphinfo->framecolor, attr);
 #endif
 }
 
@@ -846,7 +959,11 @@ curses_raw_print(const char *str)
 #ifdef PDCURSES
     /* WINDOW *win = curses_get_nhwin(MESSAGE_WIN); */
 
-    curses_message_win_puts(str, FALSE);
+    if (iflags.window_inited) {
+        curses_message_win_puts(str, FALSE);
+    } else {
+        puts(str);
+    }
 #else
     puts(str);
 #endif
@@ -927,7 +1044,8 @@ nhbell()        -- Beep at user.  [This will exist at least until sounds are
 void
 curses_nhbell(void)
 {
-    beep();
+    if (!flags.silent)
+        beep();
 }
 
 /*
@@ -1015,9 +1133,10 @@ void
 curses_delay_output(void)
 {
 #ifdef TIMED_DELAY
-    if (flags.nap) {
+    if (flags.nap && !iflags.debug_fuzzer) {
         /* refreshing the whole display is a waste of time,
          * but that's why we're here */
+        curses_update_stdscr_cursor();
         refresh();
         napms(50);
     }
@@ -1103,7 +1222,7 @@ curs_reset_windows(boolean redo_main, boolean redo_status)
     }
     if (need_redraw) {
         curses_last_messages();
-        doredraw();
+        docrt();
     }
 }
 

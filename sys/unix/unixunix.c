@@ -1,11 +1,11 @@
-/* NetHack 3.7	unixunix.c	$NHDT-Date: 1605493693 2020/11/16 02:28:13 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.32 $ */
+/* NetHack 3.7	unixunix.c	$NHDT-Date: 1687124609 2023/06/18 21:43:29 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.39 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Kenneth Lorber, Kensington, Maryland, 2015. */
 /* NetHack may be freely redistributed.  See license for details. */
 
 /* This file collects some Unix dependencies */
 
-#include "hack.h" /* mainly for index() which depends on BSD */
+#include "hack.h" /* mainly for strchr() which depends on BSD */
 
 #include <errno.h>
 #include <sys/stat.h>
@@ -13,6 +13,9 @@
 #include <fcntl.h>
 #endif
 #include <signal.h>
+
+static int veryold(int);
+static int eraseoldlocks(void);
 
 #ifdef _M_UNIX
 extern void sco_mapon(void);
@@ -65,7 +68,11 @@ veryold(int fd)
 #endif
             return 0;
     }
-    (void) close(fd);
+    /* this used to close the file upon success, leave it open upon failure;
+       that was supposed to simplify the caller's usage but ended up making
+       that be more complicated; always leave the file open so that caller
+       can close it unconditionally */
+    /*(void) close(fd);*/
     return 1;
 }
 
@@ -74,18 +81,20 @@ eraseoldlocks(void)
 {
     register int i;
 
-    g.program_state.preserve_locks = 0; /* not required but shows intent */
+#if defined(HANGUPHANDLING)
+    gp.program_state.preserve_locks = 0; /* not required but shows intent */
     /* cannot use maxledgerno() here, because we need to find a lock name
      * before starting everything (including the dungeon initialization
      * that sets astral_level, needed for maxledgerno()) up
      */
+#endif
     for (i = 1; i <= MAXDUNGEON * MAXLEVEL + 1; i++) {
         /* try to remove all */
-        set_levelfile_name(g.lock, i);
-        (void) unlink(fqname(g.lock, LEVELPREFIX, 0));
+        set_levelfile_name(gl.lock, i);
+        (void) unlink(fqname(gl.lock, LEVELPREFIX, 0));
     }
-    set_levelfile_name(g.lock, 0);
-    if (unlink(fqname(g.lock, LEVELPREFIX, 0)))
+    set_levelfile_name(gl.lock, 0);
+    if (unlink(fqname(gl.lock, LEVELPREFIX, 0)))
         return 0; /* cannot remove it */
     return 1;     /* success! */
 }
@@ -93,7 +102,9 @@ eraseoldlocks(void)
 void
 getlock(void)
 {
-    register int i = 0, fd, c;
+    static const char destroy_old_game_prompt[] =
+    "There is already a game in progress under your name.  Destroy old game?";
+    int i = 0, fd, c, too_old;
     const char *fq_lock;
 
 #ifdef TTY_GRAPHICS
@@ -115,22 +126,22 @@ getlock(void)
         error("%s", "");
     }
 
-    /* default value of g.lock[] is "1lock" where '1' gets changed to
+    /* default value of gl.lock[] is "1lock" where '1' gets changed to
        'a','b',&c below; override the default and use <uid><charname>
        if we aren't restricting the number of simultaneous games */
-    if (!g.locknum)
-        Sprintf(g.lock, "%u%s", (unsigned) getuid(), g.plname);
+    if (!gl.locknum)
+        Sprintf(gl.lock, "%u%s", (unsigned) getuid(), gp.plname);
 
-    regularize(g.lock);
-    set_levelfile_name(g.lock, 0);
+    regularize(gl.lock);
+    set_levelfile_name(gl.lock, 0);
 
-    if (g.locknum) {
-        if (g.locknum > 25)
-            g.locknum = 25;
+    if (gl.locknum) {
+        if (gl.locknum > 25)
+            gl.locknum = 25;
 
         do {
-            g.lock[0] = 'a' + i++;
-            fq_lock = fqname(g.lock, LEVELPREFIX, 0);
+            gl.lock[0] = 'a' + i++;
+            fq_lock = fqname(gl.lock, LEVELPREFIX, 0);
 
             if ((fd = open(fq_lock, 0)) == -1) {
                 if (errno == ENOENT)
@@ -140,16 +151,17 @@ getlock(void)
                 error("Cannot open %s", fq_lock);
             }
 
-            /* veryold() closes fd if true */
-            if (veryold(fd) && eraseoldlocks())
-                goto gotlock;
+            /* veryold() no longer conditionally closes fd */
+            too_old = veryold(fd);
             (void) close(fd);
-        } while (i < g.locknum);
+            if (too_old && eraseoldlocks())
+                goto gotlock;
+        } while (i < gl.locknum);
 
         unlock_file(HLOCK);
         error("Too many hacks running now.");
     } else {
-        fq_lock = fqname(g.lock, LEVELPREFIX, 0);
+        fq_lock = fqname(gl.lock, LEVELPREFIX, 0);
         if ((fd = open(fq_lock, 0)) == -1) {
             if (errno == ENOENT)
                 goto gotlock; /* no such file */
@@ -158,18 +170,15 @@ getlock(void)
             error("Cannot open %s", fq_lock);
         }
 
-        /* veryold() closes fd if true */
-        if (veryold(fd) && eraseoldlocks())
-            goto gotlock;
+        /* veryold() no longer conditionally closes fd */
+        too_old = veryold(fd);
         (void) close(fd);
-
-      {
-        const char destroy_old_game_prompt[] =
-    "There is already a game in progress under your name.  Destroy old game?";
+        if (too_old && eraseoldlocks())
+            goto gotlock;
 
         if (iflags.window_inited) {
             /* this is a candidate for paranoid_confirmation */
-            c = yn(destroy_old_game_prompt);
+            c = y_n(destroy_old_game_prompt);
         } else {
             (void) raw_printf("\n%s [yn] ", destroy_old_game_prompt);
             (void) fflush(stdout);
@@ -182,7 +191,6 @@ getlock(void)
                     ; /* eat rest of line and newline */
             }
         }
-      }
         if (c == 'y' || c == 'Y') {
             if (eraseoldlocks()) {
                 goto gotlock;
@@ -196,14 +204,14 @@ getlock(void)
         }
     }
 
-gotlock:
+ gotlock:
     fd = creat(fq_lock, FCMASK);
     unlock_file(HLOCK);
     if (fd == -1) {
         error("cannot creat lock file (%s).", fq_lock);
     } else {
-        if (write(fd, (genericptr_t) &g.hackpid, sizeof g.hackpid)
-            != sizeof g.hackpid) {
+        if (write(fd, (genericptr_t) &gh.hackpid, sizeof gh.hackpid)
+            != sizeof gh.hackpid) {
             error("cannot write lock (%s)", fq_lock);
         }
         if (close(fd) == -1) {
@@ -218,8 +226,8 @@ regularize(char *s)
 {
     register char *lp;
 
-    while ((lp = index(s, '.')) != 0 || (lp = index(s, '/')) != 0
-           || (lp = index(s, ' ')) != 0)
+    while ((lp = strchr(s, '.')) != 0 || (lp = strchr(s, '/')) != 0
+           || (lp = strchr(s, ' ')) != 0)
         *lp = '_';
 #if defined(SYSV) && !defined(AIX_31) && !defined(SVR4) && !defined(LINUX) \
     && !defined(__APPLE__)
@@ -397,3 +405,5 @@ file_exists(const char *path)
     return TRUE;
 }
 #endif
+
+/*unixunix.c*/

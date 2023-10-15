@@ -1,6 +1,7 @@
 -- NetHack themerms.lua	$NHDT-Date: 1652196294 2022/05/10 15:24:54 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.16 $
 --	Copyright (c) 2020 by Pasi Kallinen
 -- NetHack may be freely redistributed.  See license for details.
+--
 -- themerooms is an array of tables and/or functions.
 -- the tables define "frequency", "contents", "mindiff" and "maxdiff".
 -- frequency is optional; if omitted, 1 is assumed.
@@ -14,8 +15,185 @@
 --     the room only gets what you define in here.
 --   - use type = "themed" to force a room that's never converted
 --     to a special room, such as a shop or a temple.
--- core calls themerooms_generate() multiple times per level
--- to generate a single themed room.
+--
+-- for each level, the core first calls pre_themerooms_generate(),
+-- then it calls themerooms_generate() multiple times until it decides
+-- enough rooms have been generated, and then it calls
+-- post_themerooms_generate().  The lua state is persistent through
+-- the gameplay, but not across saves, so remember to reset any variables.
+
+
+local buried_treasure = { };
+
+themeroom_fills = {
+
+   -- Ice room
+   function(rm)
+      local ice = selection.room();
+      des.terrain(ice, "I");
+      if (percent(25)) then
+         local mintime = 1000 - (nh.level_difficulty() * 100);
+         local ice_melter = function(x,y)
+            nh.start_timer_at(x,y, "melt-ice", mintime + nh.rn2(1000));
+         end;
+         ice:iterate(ice_melter);
+      end
+   end,
+
+   -- Boulder room
+   {
+      mindiff = 4,
+      contents = function(rm)
+         local locs = selection.room():percentage(30);
+         local func = function(x,y)
+            if (percent(50)) then
+               des.object("boulder", x, y);
+            else
+               des.trap("rolling boulder", x, y);
+            end
+         end;
+         locs:iterate(func);
+      end
+   },
+
+   -- Spider nest
+   function(rm)
+      local spooders = nh.level_difficulty() > 8;
+      local locs = selection.room():percentage(30);
+      local func = function(x,y)
+         des.trap({ type = "web", x = x, y = y,
+                    spider_on_web = spooders and percent(80) });
+      end
+      locs:iterate(func);
+   end,
+
+   -- Trap room
+   function(rm)
+      local traps = { "arrow", "dart", "falling rock", "bear",
+                      "land mine", "sleep gas", "rust",
+                      "anti magic" };
+      shuffle(traps);
+      local locs = selection.room():percentage(30);
+      local func = function(x,y)
+         des.trap(traps[1], x, y);
+      end
+      locs:iterate(func);
+   end,
+
+   -- Buried treasure
+   function(rm)
+      des.object({ id = "chest", buried = true, contents = function(otmp)
+                      local xobj = otmp:totable();
+                      -- keep track of the last buried treasure
+                      if (xobj.NO_OBJ == nil) then
+                         buried_treasure = { x = xobj.ox, y = xobj.oy };
+                      end
+                      for i = 1, d(3,4) do
+                         des.object();
+                      end
+      end });
+   end,
+
+   -- Buried zombies
+   function(rm)
+      local diff = nh.level_difficulty()
+      -- start with [1..4] for low difficulty
+      local zombifiable = { "kobold", "gnome", "orc", "dwarf" };
+      if diff > 3 then          -- medium difficulty
+         zombifiable[5], zombifiable[6] = "elf", "human";
+         if diff > 6 then       -- high difficulty (relatively speaking)
+            zombifiable[7], zombifiable[8] = "ettin", "giant";
+         end
+      end
+      for i = 1, (rm.width * rm.height) / 2 do
+         shuffle(zombifiable);
+         local o = des.object({ id = "corpse", montype = zombifiable[1],
+                                buried = true });
+         o:stop_timer("rot-corpse");
+         o:start_timer("zombify-mon", math.random(990, 1010));
+      end
+   end,
+
+   -- Massacre
+   function(rm)
+      local mon = { "apprentice", "warrior", "ninja", "thug",
+                    "hunter", "acolyte", "abbot", "page",
+                    "attendant", "neanderthal", "chieftain",
+                    "student", "wizard", "valkyrie", "tourist",
+                    "samurai", "rogue", "ranger", "priestess",
+                    "priest", "monk", "knight", "healer",
+                    "cavewoman", "caveman", "barbarian",
+                    "archeologist" };
+      local idx = math.random(#mon);
+      for i = 1, d(5,5) do
+         if (percent(10)) then idx = math.random(#mon); end
+         des.object({ id = "corpse", montype = mon[idx] });
+      end
+   end,
+
+   -- Statuary
+   function(rm)
+      for i = 1, d(5,5) do
+         des.object({ id = "statue" });
+      end
+      for i = 1, d(3) do
+         des.trap("statue");
+      end
+   end,
+
+   -- Light source
+   {
+      eligible = function(rm) return rm.lit == false; end,
+      contents = function(rm)
+         des.object({ id = "oil lamp", lit = true });
+      end
+   },
+
+   -- Temple of the gods
+   function(rm)
+      des.altar({ align = align[1] });
+      des.altar({ align = align[2] });
+      des.altar({ align = align[3] });
+   end,
+
+   -- Ghost of an Adventurer
+   function(rm)
+      local loc = selection.room():rndcoord(0);
+      des.monster({ id = "ghost", asleep = true, waiting = true, coord = loc });
+      if percent(65) then
+         des.object({ id = "dagger", coord = loc, buc = "not-blessed" });
+      end
+      if percent(55) then
+         des.object({ class = ")", coord = loc, buc = "not-blessed" });
+      end
+      if percent(45) then
+         des.object({ id = "bow", coord = loc, buc = "not-blessed" });
+         des.object({ id = "arrow", coord = loc, buc = "not-blessed" });
+      end
+      if percent(65) then
+         des.object({ class = "[", coord = loc, buc = "not-blessed" });
+      end
+      if percent(20) then
+         des.object({ class = "=", coord = loc, buc = "not-blessed" });
+      end
+      if percent(20) then
+         des.object({ class = "?", coord = loc, buc = "not-blessed" });
+      end
+   end,
+
+   -- Storeroom
+   function(rm)
+      local locs = selection.room():percentage(30);
+      local func = function(x,y)
+         if (percent(25)) then
+            des.object("chest");
+         else
+            des.monster({ class = "m", appear_as = "obj:chest" });
+         end
+      end;
+      locs:iterate(func);
+   end,
+};
 
 themerooms = {
    {
@@ -40,7 +218,6 @@ themerooms = {
    end,
 
    -- Room in a room
-   -- FIXME: subroom location is too often left/top?
    function()
       des.room({ type = "ordinary", filled = 1,
                  contents = function()
@@ -71,115 +248,54 @@ themerooms = {
       });
    end,
 
-   -- Ice room
+   -- Nesting rooms
    function()
-      des.room({ type = "themed", filled = 1,
-                 contents = function()
-                    local ice = selection.floodfill(1,1);
-                    des.terrain(ice, "I");
-                    if (percent(25)) then
-                       local mintime = 1000 - (nh.level_difficulty() * 100);
-                       local ice_melter = function(x,y)
-                          local ax,ay = nh.abscoord(x,y);
-                          nh.start_timer_at(ax,ay, "melt-ice", mintime + nh.rn2(1000));
-                       end;
-                       ice:iterate(ice_melter);
-                    end
+      des.room({ type = "ordinary", w = 9 + nh.rn2(4), h = 9 + nh.rn2(4), filled = 1,
+                 contents = function(rm)
+                    local wid = math.random(math.floor(rm.width / 2), rm.width - 2);
+                    local hei = math.random(math.floor(rm.height / 2), rm.height - 2);
+                    des.room({ type = "ordinary", w = wid,h = hei, filled = 1,
+                               contents = function()
+                                  if (percent(90)) then
+                                     des.room({ type = "ordinary", filled = 1,
+                                                contents = function()
+                                                   des.door({ state="random", wall="all" });
+                                                   if (percent(15)) then
+                                                      des.door({ state="random", wall="all" });
+                                                   end
+                                                end
+                                     });
+                                  end
+                                  des.door({ state="random", wall="all" });
+                                  if (percent(15)) then
+                                     des.door({ state="random", wall="all" });
+                                  end
+                               end
+                    });
                  end
       });
    end,
 
-   -- Boulder room
    {
-      mindiff = 4,
+      frequency = 6,
       contents = function()
-         des.room({ type = "themed",
-                  contents = function(rm)
-                     for x = 0, rm.width - 1 do
-                        for y = 0, rm.height - 1 do
-                           if (percent(30)) then
-                              if (percent(50)) then
-                                 des.object("boulder");
-                              else
-                                 des.trap("rolling boulder");
-                              end
-                           end
-                        end
-                     end
-                  end
-         });
+         des.room({ type = "themed", contents = themeroom_fill });
       end
    },
 
-   -- Spider nest
-   function()
-      des.room({ type = "themed",
-                  contents = function(rm)
-                     local spooders = nh.level_difficulty() > 8;
-                     for x = 0, rm.width - 1 do
-                        for y = 0, rm.height - 1 do
-                           if (percent(30)) then
-                              des.trap({ type = "web", x = x, y = y,
-                                   spider_on_web = spooders and percent(80) });
-                           end
-                        end
-                     end
-                  end
-      });
-   end,
+   {
+      frequency = 2,
+      contents = function()
+         des.room({ type = "themed", lit = 0, contents = themeroom_fill });
+      end
+   },
 
-   -- Trap room
-   function()
-      des.room({ type = "themed", filled = 0,
-                 contents = function(rm)
-                    local traps = { "arrow", "dart", "falling rock", "bear",
-                                    "land mine", "sleep gas", "rust",
-                                    "anti magic" };
-                    shuffle(traps);
-                    for x = 0, rm.width - 1 do
-                       for y = 0, rm.height - 1 do
-                          if (percent(30)) then
-                             des.trap(traps[1], x, y);
-                          end
-                       end
-                    end
-                 end
-      });
-   end,
-
-   -- Buried treasure
-   function()
-      des.room({ type = "ordinary", filled = 1,
-                 contents = function()
-                    des.object({ id = "chest", buried = true, contents = function()
-                                    for i = 1, d(3,4) do
-                                       des.object();
-                                    end
-                    end });
-                 end
-      });
-   end,
-
-   -- Massacre
-   function()
-      des.room({ type = "themed",
-                 contents = function()
-                    local mon = { "apprentice", "warrior", "ninja", "thug",
-                                  "hunter", "acolyte", "abbot", "page",
-                                  "attendant", "neanderthal", "chieftain",
-                                  "student", "wizard", "valkyrie", "tourist",
-                                  "samurai", "rogue", "ranger", "priestess",
-                                  "priest", "monk", "knight", "healer",
-                                  "cavewoman", "caveman", "barbarian",
-                                  "archeologist" };
-                    shuffle(mon);
-                    for i = 1, d(5,5) do
-                       if (percent(10)) then shuffle(mon); end
-                       des.object({ id = "corpse", montype = mon[1] });
-                    end
-                 end
-      });
-   end,
+   {
+      frequency = 2,
+      contents = function()
+         des.room({ type = "themed", filled = 1, contents = themeroom_fill });
+      end
+   },
 
    -- Pillars
    function()
@@ -194,70 +310,6 @@ themerooms = {
                           des.terrain({ x = x * 4 + 2, y = y * 4 + 3, typ = terr[1], lit = -2 });
                           des.terrain({ x = x * 4 + 3, y = y * 4 + 3, typ = terr[1], lit = -2 });
                        end
-                    end
-                 end
-      });
-   end,
-
-   -- Statuary
-   function()
-      des.room({ type = "themed",
-                 contents = function()
-                    for i = 1, d(5,5) do
-                       des.object({ id = "statue" });
-                    end
-                    for i = 1, d(3) do
-                       des.trap("statue");
-                    end
-                 end
-      });
-   end,
-
-   -- Light source
-   function()
-      des.room({ type = "themed", lit = 0,
-                 contents = function()
-                    des.object({ id = "oil lamp", lit = true });
-                 end
-      });
-   end,
-
-   -- Temple of the gods
-   function()
-      des.room({ type = "themed",
-                 contents = function()
-                    des.altar({ align = align[1] });
-                    des.altar({ align = align[2] });
-                    des.altar({ align = align[3] });
-                 end
-      });
-   end,
-
-   -- Ghost of an Adventurer
-   function()
-      des.room({ type = "themed", lit = 0,
-                 contents = function(rm)
-                    local px = nh.rn2(rm.width);
-                    local py = nh.rn2(rm.height);
-                    des.monster({ id = "ghost", asleep = true, waiting = true, coord = {px,py} });
-                    if percent(65) then
-                       des.object({ id = "dagger", coord = {px,py}, buc = "not-blessed" });
-                    end
-                    if percent(55) then
-                       des.object({ class = ")", coord = {px,py}, buc = "not-blessed" });
-                    end
-                    if percent(45) then
-                       des.object({ id = "bow", coord = {px,py}, buc = "not-blessed" });
-                       des.object({ id = "arrow", coord = {px,py}, buc = "not-blessed" });
-                    end
-                    if percent(65) then
-                       des.object({ class = "[", coord = {px,py}, buc = "not-blessed" });
-                    end
-                    if percent(20) then
-                       des.object({ class = "=", coord = {px,py}, buc = "not-blessed" });
-                    end
-                    if percent(20) then
-                       des.object({ class = "?", coord = {px,py}, buc = "not-blessed" });
                     end
                  end
       });
@@ -311,7 +363,7 @@ themerooms = {
 |......|
 |......|
 |......|
---------]], contents = function(m) des.region({ region={1,1,3,3}, type="ordinary", irregular=true, filled=1 }); end });
+--------]], contents = function(m) filler_region(1,1); end });
    end,
 
    -- L-shaped, rot 1
@@ -324,7 +376,7 @@ xxx|...|
 |......|
 |......|
 |......|
---------]], contents = function(m) des.region({ region={5,1,5,3}, type="ordinary", irregular=true, filled=1 }); end });
+--------]], contents = function(m) filler_region(5,1); end });
    end,
 
    -- L-shaped, rot 2
@@ -337,7 +389,7 @@ xxx|...|
 ----...|
 xxx|...|
 xxx|...|
-xxx-----]], contents = function(m) des.region({ region={1,1,2,2}, type="ordinary", irregular=true, filled=1 }); end });
+xxx-----]], contents = function(m) filler_region(1,1); end });
    end,
 
    -- L-shaped, rot 3
@@ -350,7 +402,7 @@ xxx-----]], contents = function(m) des.region({ region={1,1,2,2}, type="ordinary
 |...----
 |...|xxx
 |...|xxx
------xxx]], contents = function(m) des.region({ region={1,1,2,2}, type="ordinary", irregular=true, filled=1 }); end });
+-----xxx]], contents = function(m) filler_region(1,1); end });
    end,
 
    -- Blocked center
@@ -372,7 +424,7 @@ if (percent(30)) then
    shuffle(terr);
    des.replace_terrain({ region = {1,1, 9,9}, fromterrain = "L", toterrain = terr[1] });
 end
-des.region({ region={1,1,2,2}, type="ordinary", irregular=true, filled=1 });
+filler_region(1,1);
 end });
    end,
 
@@ -385,7 +437,7 @@ x--.--x
 |.....|
 --...--
 x--.--x
-xx---xx]], contents = function(m) des.region({ region={3,3,3,3}, type="ordinary", irregular=true, filled=1 }); end });
+xx---xx]], contents = function(m) filler_region(3,3); end });
    end,
 
    -- Circular, medium
@@ -399,7 +451,7 @@ x--...--x
 |.......|
 --.....--
 x--...--x
-xx-----xx]], contents = function(m) des.region({ region={4,4,4,4}, type="ordinary", irregular=true, filled=1 }); end });
+xx-----xx]], contents = function(m) filler_region(4,4); end });
    end,
 
    -- Circular, big
@@ -415,7 +467,7 @@ x-.......-x
 --.......--
 x-.......-x
 x---...---x
-xxx-----xxx]], contents = function(m) des.region({ region={5,5,5,5}, type="ordinary", irregular=true, filled=1 }); end });
+xxx-----xxx]], contents = function(m) filler_region(5,5); end });
    end,
 
    -- T-shaped
@@ -428,7 +480,7 @@ xxx|...|xxx
 |.........|
 |.........|
 |.........|
------------]], contents = function(m) des.region({ region={5,5,5,5}, type="ordinary", irregular=true, filled=1 }); end });
+-----------]], contents = function(m) filler_region(5,5); end });
    end,
 
    -- T-shaped, rot 1
@@ -444,7 +496,7 @@ xxx|...|xxx
 |...----
 |...|xxx
 |...|xxx
------xxx]], contents = function(m) des.region({ region={2,2,2,2}, type="ordinary", irregular=true, filled=1 }); end });
+-----xxx]], contents = function(m) filler_region(2,2); end });
    end,
 
    -- T-shaped, rot 2
@@ -457,7 +509,7 @@ xxx|...|xxx
 ----...----
 xxx|...|xxx
 xxx|...|xxx
-xxx-----xxx]], contents = function(m) des.region({ region={2,2,2,2}, type="ordinary", irregular=true, filled=1 }); end });
+xxx-----xxx]], contents = function(m) filler_region(2,2); end });
    end,
 
    -- T-shaped, rot 3
@@ -473,7 +525,7 @@ xxx|...|
 ----...|
 xxx|...|
 xxx|...|
-xxx-----]], contents = function(m) des.region({ region={5,5,5,5}, type="ordinary", irregular=true, filled=1 }); end });
+xxx-----]], contents = function(m) filler_region(5,5); end });
    end,
 
    -- S-shaped
@@ -489,7 +541,7 @@ xxx-----]], contents = function(m) des.region({ region={5,5,5,5}, type="ordinary
 ----...|
 xxx|...|
 xxx|...|
-xxx-----]], contents = function(m) des.region({ region={2,2,2,2}, type="ordinary", irregular=true, filled=1 }); end });
+xxx-----]], contents = function(m) filler_region(2,2); end });
    end,
 
    -- S-shaped, rot 1
@@ -502,7 +554,7 @@ xxx|......|
 |......----
 |......|xxx
 |......|xxx
---------xxx]], contents = function(m) des.region({ region={5,5,5,5}, type="ordinary", irregular=true, filled=1 }); end });
+--------xxx]], contents = function(m) filler_region(5,5); end });
    end,
 
    -- Z-shaped
@@ -518,7 +570,7 @@ xxx|...|
 |...----
 |...|xxx
 |...|xxx
------xxx]], contents = function(m) des.region({ region={5,5,5,5}, type="ordinary", irregular=true, filled=1 }); end });
+-----xxx]], contents = function(m) filler_region(5,5); end });
    end,
 
    -- Z-shaped, rot 1
@@ -531,7 +583,7 @@ xxx|...|
 ----......|
 xxx|......|
 xxx|......|
-xxx--------]], contents = function(m) des.region({ region={2,2,2,2}, type="ordinary", irregular=true, filled=1 }); end });
+xxx--------]], contents = function(m) filler_region(2,2); end });
    end,
 
    -- Cross
@@ -547,7 +599,7 @@ xxx|...|xxx
 ----...----
 xxx|...|xxx
 xxx|...|xxx
-xxx-----xxx]], contents = function(m) des.region({ region={6,6,6,6}, type="ordinary", irregular=true, filled=1 }); end });
+xxx-----xxx]], contents = function(m) filler_region(6,6); end });
    end,
 
    -- Four-leaf clover
@@ -563,7 +615,7 @@ xx|.....|xx
 |.........|
 |...---...|
 |...|x|...|
------x-----]], contents = function(m) des.region({ region={6,6,6,6}, type="ordinary", irregular=true, filled=1 }); end });
+-----x-----]], contents = function(m) filler_region(6,6); end });
    end,
 
    -- Water-surrounded vault
@@ -576,12 +628,41 @@ xx|.....|xx
 }----}
 }}}}}}]], contents = function(m) des.region({ region={3,3,3,3}, type="themed", irregular=true, filled=0, joined=false });
      local nasty_undead = { "giant zombie", "ettin zombie", "vampire lord" };
-     des.object("chest", 2, 2);
-     des.object("chest", 3, 2);
-     des.object("chest", 2, 3);
-     des.object("chest", 3, 3);
+     local chest_spots = { { 2, 2 }, { 3, 2 }, { 2, 3 }, { 3, 3 } };
+
+     shuffle(chest_spots)
+     -- Guarantee an escape item inside one of the chests, to prevent the hero
+     -- falling in from above and becoming permanently stuck
+     -- [cf. generate_way_out_method(sp_lev.c)].
+     -- If the escape item is made of glass or crystal, make sure that the
+     -- chest isn't locked so that kicking it to gain access to its contents
+     -- won't be necessary; otherwise retain lock state from random creation.
+     -- "pick-axe", "dwarvish mattock" could be included in the list of escape
+     -- items but don't normally generate in containers.
+     local escape_items = {
+        "scroll of teleportation", "ring of teleportation",
+        "wand of teleportation", "wand of digging"
+     };
+     local itm = obj.new(escape_items[math.random(#escape_items)]);
+     local itmcls = itm:class()
+     local box
+     if itmcls[ "material" ] == 19 then                         -- GLASS==19
+         -- item is made of glass so explicitly force chest to be unlocked
+	 box = des.object({ id = "chest", coord = chest_spots[1],
+                            olocked = "no" });
+     else
+         -- item isn't made of glass; accept random locked/unlocked state
+	 box = des.object({ id = "chest", coord = chest_spots[1] });
+     end;
+     box:addcontent(itm);
+
+     for i = 2, #chest_spots do
+         des.object({ id = "chest", coord = chest_spots[i] });
+     end
+
      shuffle(nasty_undead);
      des.monster(nasty_undead[1], 2, 2);
+     des.exclusion({ type = "teleport", region = { 2,2, 3,3 } });
 end });
    end,
 
@@ -640,7 +721,18 @@ end });
 
 };
 
-function is_eligible(room)
+
+function filler_region(x, y)
+   local rmtyp = "ordinary";
+   local func = nil;
+   if (percent(30)) then
+      rmtyp = "themed";
+      func = themeroom_fill;
+   end
+   des.region({ region={x,y,x,y}, type=rmtyp, irregular=true, filled=1, contents = func });
+end
+
+function is_eligible(room, mkrm)
    local t = type(room);
    local diff = nh.level_difficulty();
    if (t == "table") then
@@ -649,19 +741,23 @@ function is_eligible(room)
       elseif (room.maxdiff ~= nil and diff > room.maxdiff) then
          return false
       end
+      if (mkrm ~= nil and room.eligible ~= nil) then
+         return room.eligible(mkrm);
+      end
    elseif (t == "function") then
       -- functions currently have no constraints
    end
    return true
 end
 
+-- called repeatedly until the core decides there are enough rooms
 function themerooms_generate()
    local pick = 1;
    local total_frequency = 0;
    for i = 1, #themerooms do
       -- Reservoir sampling: select one room from the set of eligible rooms,
       -- which may change on different levels because of level difficulty.
-      if is_eligible(themerooms[i]) then
+      if is_eligible(themerooms[i], nil) then
          local this_frequency;
          if (type(themerooms[i]) == "table" and themerooms[i].frequency ~= nil) then
             this_frequency = themerooms[i].frequency;
@@ -683,3 +779,61 @@ function themerooms_generate()
       themerooms[pick]();
    end
 end
+
+-- called before any rooms are generated
+function pre_themerooms_generate()
+   -- reset the buried treasure location
+   buried_treasure = { };
+end
+
+-- called after all rooms have been generated
+function post_themerooms_generate()
+   if (buried_treasure.x ~= nil) then
+      local floors = selection.negate():filter_mapchar(".");
+      local pos = floors:rndcoord(0);
+      local tx = buried_treasure.x - pos.x - 1;
+      local ty = buried_treasure.y - pos.y;
+      local dig = "";
+      if (tx == 0 and ty == 0) then
+         dig = " here";
+      else
+         if (tx < 0 or tx > 0) then
+            dig = string.format(" %i %s", math.abs(tx), (tx > 0) and "east" or "west");
+         end
+         if (ty < 0 or ty > 0) then
+            dig = dig .. string.format(" %i %s", math.abs(ty), (ty > 0) and "south" or "north");
+         end
+      end
+      des.engraving({ coord = pos, type = "burn", text = "Dig" .. dig });
+   end
+end
+
+function themeroom_fill(rm)
+   local pick = 1;
+   local total_frequency = 0;
+   for i = 1, #themeroom_fills do
+      -- Reservoir sampling: select one room from the set of eligible rooms,
+      -- which may change on different levels because of level difficulty.
+      if is_eligible(themeroom_fills[i], rm) then
+         local this_frequency;
+         if (type(themeroom_fills[i]) == "table" and themeroom_fills[i].frequency ~= nil) then
+            this_frequency = themeroom_fills[i].frequency;
+         else
+            this_frequency = 1;
+         end
+         total_frequency = total_frequency + this_frequency;
+         -- avoid rn2(0) if a room has freq 0
+         if this_frequency > 0 and nh.rn2(total_frequency) < this_frequency then
+            pick = i;
+         end
+      end
+   end
+
+   local t = type(themeroom_fills[pick]);
+   if (t == "table") then
+      themeroom_fills[pick].contents(rm);
+   elseif (t == "function") then
+      themeroom_fills[pick](rm);
+   end
+end
+

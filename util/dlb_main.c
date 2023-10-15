@@ -1,4 +1,4 @@
-/* NetHack 3.7	dlb_main.c	$NHDT-Date: 1629969943 2021/08/26 09:25:43 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.18 $ */
+/* NetHack 3.7	dlb_main.c	$NHDT-Date: 1687547434 2023/06/23 19:10:34 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.24 $ */
 /* Copyright (c) Kenneth Lorber, Bethesda, Maryland, 1993. */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -14,8 +14,8 @@
 #include <string.h>
 #endif
 
-static void xexit(int) NORETURN;
-extern void panic(const char *, ...) NORETURN;
+ATTRNORETURN static void xexit(int) NORETURN;
+ATTRNORETURN extern void panic(const char *, ...) NORETURN;
 char *eos(char *); /* also used by dlb.c */
 FILE *fopen_datafile(const char *, const char *);
 unsigned FITSuint_(unsigned long long, const char *, int);
@@ -33,8 +33,8 @@ extern boolean open_library(const char *, library *);
 extern void close_library(library *);
 
 static void Write(int, char *, long);
-static void usage(void) NORETURN;
-static void verbose_help(void) NORETURN;
+ATTRNORETURN static void usage(void) NORETURN;
+ATTRNORETURN static void verbose_help(void) NORETURN;
 static void write_dlb_directory(int, int, libdir *, long, long, long);
 
 static char default_progname[] = "dlb";
@@ -78,7 +78,7 @@ static char origdir[255] = "";
  *  C dir	chdir to dir (used ONCE, not like tar's -C)
  */
 
-static void
+ATTRNORETURN static void
 usage(void)
 {
     (void) printf("Usage: %s [ctxCIfv] arguments... [files...]\n", progname);
@@ -88,7 +88,7 @@ usage(void)
     /*NOTREACHED*/
 }
 
-static void
+ATTRNORETURN static void
 verbose_help(void)
 {
     static const char *const long_help[] = {
@@ -154,6 +154,8 @@ eos(char *s)
 #define UNUSED_if_no_DLB UNUSED
 #endif
 
+DISABLE_WARNING_UNREACHABLE_CODE
+
 int
 main(int argc UNUSED_if_no_DLB, char **argv UNUSED_if_no_DLB)
 {
@@ -166,10 +168,12 @@ main(int argc UNUSED_if_no_DLB, char **argv UNUSED_if_no_DLB)
     char action = ' ';
     library lib;
 
-    if (argc > 0 && argv[0] && *argv[0])
+    if (argc > 0)
         progname = argv[0];
+    if (!progname || !*progname)
+        progname = default_progname;
 #ifdef VMS
-    progname = vms_basename(progname);
+    progname = vms_basename(progname, FALSE);
 #endif
 
     if (argc < 2) {
@@ -482,6 +486,8 @@ main(int argc UNUSED_if_no_DLB, char **argv UNUSED_if_no_DLB)
     return 0;
 }
 
+RESTORE_WARNING_UNREACHABLE_CODE
+
 #ifdef DLB
 #ifdef DLBLIB
 
@@ -533,7 +539,7 @@ write_dlb_directory(int out, int nfiles, libdir *ld,
 #endif /* DLBLIB */
 #endif /* DLB */
 
-static void
+ATTRNORETURN static void
 xexit(int retcd)
 {
 #ifdef DLB

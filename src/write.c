@@ -111,8 +111,9 @@ dowrite(struct obj *pen)
     int first, last, i, deferred, deferralchance, real;
     boolean by_descr = FALSE;
     const char *typeword;
+    int spell_knowledge;
 
-    if (nohands(g.youmonst.data)) {
+    if (nohands(gy.youmonst.data)) {
         You("need hands to be able to write!");
         return ECMD_OK;
     } else if (Glib) {
@@ -170,8 +171,8 @@ dowrite(struct obj *pen)
 
     deferred = real = 0; /* not any scroll or book */
     deferralchance = 0;  /* incremented for each oc_uname match */
-    first = g.bases[(int) paper->oclass];
-    last = g.bases[(int) paper->oclass + 1] - 1;
+    first = gb.bases[(int) paper->oclass];
+    last = gb.bases[(int) paper->oclass + 1] - 1;
     /* first loop: look for match with name/description */
     for (i = first; i <= last; i++) {
         /* extra shufflable descr not representing a real object */
@@ -314,6 +315,10 @@ dowrite(struct obj *pen)
      * book type.  One has previously been read (and its effect
      * was evident) or been ID'd via scroll/spell/throne and it
      * will be on the discoveries list.
+     * Unknown spellbooks can also be written by name if the hero
+     * has fresh knowledge of the spell, or if the spell is almost
+     * forgotten and the hero is Lucky (with a greater chance than
+     * if the spell is unknown or forgotten).
      * (Previous versions allowed scrolls and books to be written
      * by type name if they were on the discoveries list via being
      * given a user-assigned name, even though doing the latter
@@ -332,12 +337,20 @@ dowrite(struct obj *pen)
      * Normal requirements can be overridden if hero is Lucky.
      */
 
+    if (paper->oclass == SPBOOK_CLASS) {
+        spell_knowledge = known_spell(new_obj->otyp);
+    } else {
+        spell_knowledge = spe_Unknown;
+    }
     /* if known, then either by-name or by-descr works */
     if (!objects[new_obj->otyp].oc_name_known
         /* else if named, then only by-descr works */
-        && !(by_descr && label_known(new_obj->otyp, g.invent))
-        /* and Luck might override after both checks have failed */
-        && rnl(Role_if(PM_WIZARD) ? 5 : 15)) {
+        && !(by_descr && label_known(new_obj->otyp, gi.invent))
+        /* else fresh knowledge of the spell works */
+        && spell_knowledge != spe_Fresh
+        /* and Luck might override after previous checks have failed */
+        && rnl((Role_if(PM_WIZARD) || spell_knowledge == spe_GoingStale)
+               ? 5 : 15)) {
         You("%s to write that.", by_descr ? "fail" : "don't know how");
         /* scrolls disappear, spellbooks don't */
         if (paper->oclass == SPBOOK_CLASS) {
@@ -349,7 +362,7 @@ dowrite(struct obj *pen)
                 Strcpy(namebuf, OBJ_DESCR(objects[new_obj->otyp]));
                 wipeout_text(namebuf, (6 + MAXULEV - u.ulevel) / 6, 0);
             } else
-                Sprintf(namebuf, "%s was here!", g.plname);
+                Sprintf(namebuf, "%s was here!", gp.plname);
             You("write \"%s\" and the scroll disappears.", namebuf);
             useup(paper);
         }
@@ -391,7 +404,7 @@ dowrite(struct obj *pen)
        specifically chosen item so hero recognizes it even if blind;
        the exception is for being lucky writing an undiscovered scroll,
        where the label associated with the type-name isn't known yet */
-    new_obj->dknown = label_known(new_obj->otyp, g.invent) ? 1 : 0;
+    new_obj->dknown = label_known(new_obj->otyp, gi.invent) ? 1 : 0;
 
     new_obj = hold_another_object(new_obj, "Oops!  %s out of your grasp!",
                                   The(aobjnam(new_obj, "slip")),

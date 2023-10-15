@@ -1,4 +1,4 @@
-/* NetHack 3.7	end.c	$NHDT-Date: 1646322468 2022/03/03 15:47:48 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.240 $ */
+/* NetHack 3.7	end.c	$NHDT-Date: 1693519356 2023/08/31 22:02:36 $  $NHDT-Branch: keni-crashweb2 $:$NHDT-Revision: 1.277 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -29,7 +29,8 @@ static void disclose(int, boolean);
 static void get_valuables(struct obj *);
 static void sort_valuables(struct valuable_data *, int);
 static void artifact_score(struct obj *, boolean, winid);
-static void really_done(int) NORETURN;
+static boolean fuzzer_savelife(int);
+ATTRNORETURN static void really_done(int) NORETURN;
 static void savelife(int);
 static boolean should_query_disclose_option(int, char *);
 #ifdef DUMPLOG
@@ -38,27 +39,27 @@ static void dump_plines(void);
 static void dump_everything(int, time_t);
 
 #if defined(__BEOS__) || defined(MICRO) || defined(OS2) || defined(WIN32)
-extern void nethack_exit(int) NORETURN;
+ATTRNORETURN extern void nethack_exit(int) NORETURN;
 #else
 #define nethack_exit exit
 #endif
 
-#define done_stopprint g.program_state.stopprint
+#define done_stopprint gp.program_state.stopprint
 
 #ifndef PANICTRACE
-#define NH_abort NH_abort_
+#define NH_abort(x) NH_abort_
 #endif
 
 #ifdef AMIGA
-#define NH_abort_() Abort(0)
+#define NH_abort_ Abort(0)
 #else
 #ifdef SYSV
-#define NH_abort_() (void) abort()
+#define NH_abort_ (void) abort()
 #else
 #ifdef WIN32
-#define NH_abort_() win32_abort()
+#define NH_abort_ win32_abort()
 #else
-#define NH_abort_() abort()
+#define NH_abort_ abort()
 #endif
 #endif /* !SYSV */
 #endif /* !AMIGA */
@@ -76,6 +77,10 @@ extern void nethack_exit(int) NORETURN;
  * gdb:   +gives more detailed information
  *        +works on more OS versions
  *        -requires -g, which may preclude -O on some compilers
+ *
+ * And the UI: if sysopt.crashreporturl, and defined(CRASHREPORT)
+ * we gather the stacktrace (etc) and launch a helper to submit a bug report
+ * otherwise we just use stdout.  Requires libc for now.
  */
 #ifdef SYSCF
 #define SYSOPT_PANICTRACE_GDB sysopt.panictrace_gdb
@@ -93,11 +98,13 @@ extern void nethack_exit(int) NORETURN;
 #endif
 #endif
 
-static void NH_abort(void);
+#ifdef PANICTRACE
+static void NH_abort(char *);
+#endif
 #ifndef NO_SIGNAL
 static void panictrace_handler(int);
 #endif
-static boolean NH_panictrace_libc(void);
+static boolean NH_panictrace_libc(char *);
 static boolean NH_panictrace_gdb(void);
 
 #ifndef NO_SIGNAL
@@ -125,7 +132,7 @@ panictrace_handler(int sig_unused UNUSED)
 
     f2 = (int) write(2, SIG_MSG, sizeof SIG_MSG - 1);
     nhUse(f2);  /* what could we do if write to fd#2 (stderr) fails  */
-    NH_abort(); /* ... and we're already in the process of quitting? */
+    NH_abort(NULL); /* ... and we're already in the process of quitting? */
 }
 
 void
@@ -164,8 +171,9 @@ panictrace_setsignals(boolean set)
 }
 #endif /* NO_SIGNAL */
 
+#ifdef PANICTRACE
 static void
-NH_abort(void)
+NH_abort(char *why)
 {
     int gdb_prio = SYSOPT_PANICTRACE_GDB;
     int libc_prio = SYSOPT_PANICTRACE_LIBC;
@@ -182,9 +190,9 @@ NH_abort(void)
         gdb_prio++;
 
     if (gdb_prio > libc_prio) {
-        (void) (NH_panictrace_gdb() || (libc_prio && NH_panictrace_libc()));
+        (void) (NH_panictrace_gdb() || (libc_prio && NH_panictrace_libc(why)));
     } else {
-        (void) (NH_panictrace_libc() || (gdb_prio && NH_panictrace_gdb()));
+        (void) (NH_panictrace_libc(why) || (gdb_prio && NH_panictrace_gdb()));
     }
 
 #else /* VMS */
@@ -199,12 +207,231 @@ NH_abort(void)
 #ifndef NO_SIGNAL
     panictrace_setsignals(FALSE);
 #endif
-    NH_abort_();
+    NH_abort_;
+}
+#endif
+
+/* Build a URL with a query string and try to launch a new browser window
+ * to report from panic() or impossible().  Requires libc support for
+ * the stacktrace.  Uses memory on the stack to avoid memory allocation
+ * (but libc can still do anything it wants). */
+
+/* size of argument list for execve(2) */
+#define SWR_LINES 20
+/* max stack frames and header lines (details field) */
+#define SWR_FRAMES 20
+#define SWR_ADD(line) {if(xargc<(SWR_LINES-1)) xargv[xargc++] = line;}
+
+#ifdef CRASHREPORT
+# include <fcntl.h>
+# define HASH_PRAGMA_START \
+    _Pragma("GCC diagnostic push"); \
+    _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+# define HASH_PRAGMA_END   _Pragma("GCC diagnostic pop");
+# ifdef MACOS
+#  include <CommonCrypto/CommonDigest.h>
+#  define HASH_CONTEXT CC_MD4_CTX
+#  define HASH_INIT(ctx) CC_MD4_Init(ctx)
+#  define HASH_UPDATE(ctx, ptr, len) CC_MD4_Update(ctx, ptr, len)
+#  define HASH_FINISH(ctx, out) CC_MD4_Final(out, ctx)
+#  define HASH_RESULT_SIZE CC_MD4_DIGEST_LENGTH
+# endif
+# ifdef __linux__
+#  include <openssl/md4.h>
+#  define HASH_CONTEXT MD4_CTX
+#  define HASH_INIT(ctx) MD4_Init(ctx)
+#  define HASH_UPDATE(ctx, ptr, len) MD4_Update(ctx, ptr, len)
+#  define HASH_FINISH(ctx, out) MD4_Final(out, ctx)
+#  define HASH_RESULT_SIZE MD4_DIGEST_LENGTH
+# endif
+// Binary ID - Use only as a hint to contact.html for recognizing our own
+// binaries.  This is easily spoofed!
+static char bid[(2*HASH_RESULT_SIZE)+1];
+
+/* ARGSUSED */
+void
+crashreport_init(int argc UNUSED, char *argv[] UNUSED){
+    unsigned char tmp[HASH_RESULT_SIZE];
+    HASH_PRAGMA_START
+    HASH_CONTEXT ctx;
+    HASH_INIT(&ctx);
+#ifdef MACOS
+    char *binfile = argv[0];
+    if (!binfile || !*binfile) {
+# ifdef BETA
+                // If this triggers, investigate CFBundleGetMainBundle
+                // or CFBundleCopyExecutableURL.
+        raw_print("BETA warning: crashreport_init called without useful info");
+# endif
+        goto skip;
+    }
+#endif
+#ifdef __linux__
+    char binfile[PATH_MAX+1];
+    int len = readlink("/proc/self/exe", binfile, sizeof(binfile)-1);
+    if (len>0) {
+        binfile[len] = '\0';
+    } else {
+        goto skip;
+    }
+#endif
+    int fd = open(binfile, O_RDONLY, 0);
+    if (fd == -1) {
+# ifdef BETA
+        raw_printf("open e=%s",strerror(errno));
+# endif
+        goto skip;
+    }
+    int segsize;
+    char segment[4096];
+    while (0 < (segsize = read(fd, segment,sizeof(segment)))) {
+        HASH_UPDATE(&ctx, segment, segsize);
+    }
+    HASH_FINISH(&ctx, tmp);
+    close(fd);
+
+    char *p = bid;
+    unsigned char *in = &tmp[0];
+    char cnt=HASH_RESULT_SIZE;
+    while (cnt--) {
+        p += snprintf(p, HASH_RESULT_SIZE-(p-bid), "%02x",*(in++));
+    }
+    *p = '\0';
+    return;
+skip:
+    strncpy((char *)bid,"unknown",sizeof(bid)-1);
+    HASH_PRAGMA_END
+}
+#undef HASH_CONTEXT
+#undef HASH_INIT
+#undef HASH_UPDATE
+#undef HASH_FINISH
+#undef HASH_RESULT_SIZE
+#undef HASH_PRAGMA_START
+#undef HASH_PRAGMA_END
+
+void
+crashreport_bidshow(void){
+    raw_print(bid);
 }
 
+boolean
+submit_web_report(const char *msg, char *why){
+    if (sysopt.crashreporturl) {
+        const char *xargv[SWR_LINES];
+        char version[100];
+        char versionstring[200];        // used twice as a temp
+        int  xargc = 0;
+        char wholetrace[SWR_LINES*80];  // XXX roughly 71 on MacOS, plus buffer
+        int  prelines = 0;              // count of lines in trace header
+        char nbuf[6];                   // number buffer
+        extern char **environ;
+        pid_t pid;
+
+        SWR_ADD(CRASHREPORT);
+        SWR_ADD(sysopt.crashreporturl);
+                // then pairs of key value
+                // subject, generate something useful
+        SWR_ADD("subject");
+        snprintf(version, sizeof(version), "%s report for NetHack %s",
+            msg, version_string(versionstring, sizeof(versionstring)));
+        SWR_ADD(version);
+                // name:  someday, this might be stored in nethackcnf
+                // email: someday, this might be stored in nethackcnf
+                // gitver, pull from version.c
+        SWR_ADD("gitver");
+        SWR_ADD(getversionstring(versionstring, sizeof(versionstring)));
+                // hardware: leave for user
+                // software: leave for user
+                // comments: leave for user
+                // details: stack trace
+        SWR_ADD("details");
+
+// XXX header for wholetrace - what other info do we want?
+// NB: prelines not tested against size of SWR_FRAMES.
+#define SWR_HDR(line) \
+  if (endp<&wholetrace[sizeof(wholetrace)]) { \
+    endp+=snprintf(endp, sizeof(wholetrace)-(endp-wholetrace), "%s\n",line); \
+    prelines++; \
+  }
+#define SWR_HDRnonl(line) \
+  if (endp<&wholetrace[sizeof(wholetrace)]) { \
+    endp+=snprintf(endp, sizeof(wholetrace)-(endp-wholetrace), "%s",line); \
+  }
+        char *endp = wholetrace;
+        wholetrace[0] = 0;
+        if (why) {
+            SWR_HDR(why);
+        }
+
+        SWR_HDRnonl("bid: ");
+        SWR_HDR(bid);
+
+        void *bt[SWR_FRAMES];
+        int count, x;
+        char **info, buf[BUFSZ];
+
+        count = backtrace(bt, SIZE(bt));
+        info = backtrace_symbols(bt, count);
+        for (x = 0; x < count; x++) {
+            copynchars(buf, info[x], (int) sizeof buf - 1);
+                /* try to remove up to 16 blank spaces by removing 8 twice */
+            (void) strsubst(buf, "        ", "");
+            (void) strsubst(buf, "        ", "");
+            snprintf(endp, SWR_FRAMES*80-(endp-wholetrace), "[%02lu] %s\n",
+                (unsigned long) x, buf);
+            endp = eos(endp);
+        }
+        *(endp-1) = '\0';   // remove last newline
+        SWR_ADD(wholetrace);
+
+                // detailrows min(actual,50)  Guess since we can't know the
+                //     width of the window.
+        SWR_ADD("detailrows");
+        (void)snprintf(nbuf,sizeof(nbuf),"%d",count+prelines);
+        SWR_ADD(nbuf);
+        xargv[xargc++] = 0; // terminate array
+
+        pid = fork();
+        if (pid == 0) {
+            execve(CRASHREPORT, (char * const *)xargv, environ);
+            char err[100];
+            sprintf(err, "Can't start " CRASHREPORT ": %s", strerror(errno));
+            raw_print(err);
+        } else {
+            int status;
+            errno=0;
+                    // XXX do we _really_ know this is the right pid?
+            (void)waitpid(pid, &status, 0);
+            if (status) {         // XXX check could be more precise
+#if 0
+                    // Not useful at the moment. XXX
+                char err[100];
+                sprintf(err, "pid=%d e=%d status=%0x",wpid,errno,status);
+                raw_print(err);
+#endif
+                return FALSE;
+            }
+        }
+        /* free(info);   -- Don't risk it. */
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif  /* CRASHREPORT */
+#undef SWR_ADD
+#undef SWR_FRAMES
+#undef SWR_HDR
+#undef SWR_LINES
+
+/*ARGSUSED*/
 static boolean
-NH_panictrace_libc(void)
+NH_panictrace_libc(char *why UNUSED)
 {
+#ifdef CRASHREPORT
+    if(submit_web_report("Panic",why)) return TRUE;
+#endif
+
 #ifdef PANICTRACE_LIBC
     void *bt[20];
     int count, x;
@@ -315,7 +542,7 @@ done1(int sig_unused UNUSED)
         clear_nhwindow(WIN_MESSAGE);
         curs_on_u();
         wait_synch();
-        if (g.multi > 0)
+        if (gm.multi > 0)
             nomul(0);
     } else {
         (void) done2();
@@ -326,21 +553,32 @@ done1(int sig_unused UNUSED)
 int
 done2(void)
 {
-    if (!paranoid_query(ParanoidQuit, "Really quit?")) {
+    boolean abandon_tutorial = FALSE;
+
+    if (In_tutorial(&u.uz)
+        && y_n("Switch from the tutorial back to regular play?") == 'y')
+        abandon_tutorial = TRUE;
+
+    if (abandon_tutorial || !paranoid_query(ParanoidQuit, "Really quit?")) {
 #ifndef NO_SIGNAL
         (void) signal(SIGINT, (SIG_RET_TYPE) done1);
 #endif
         clear_nhwindow(WIN_MESSAGE);
         curs_on_u();
         wait_synch();
-        if (g.multi > 0)
+        if (gm.multi > 0)
             nomul(0);
-        if (g.multi == 0) {
+        if (gm.multi == 0) {
             u.uinvulnerable = FALSE; /* avoid ctrl-C bug -dlc */
             u.usleep = 0;
         }
+
+        if (abandon_tutorial)
+            schedule_goto(&u.ucamefrom, UTOTYPE_ATSTAIRS,
+                          "Resuming regular play", (char *) 0);
         return ECMD_OK;
     }
+
 #if (defined(UNIX) || defined(VMS) || defined(LATTICE))
     if (wizard) {
         int c;
@@ -359,15 +597,16 @@ done2(void)
 #ifndef NO_SIGNAL
             (void) signal(SIGINT, (SIG_RET_TYPE) done1);
 #endif
+            if (soundprocs.sound_exit_nhsound)
+                (*soundprocs.sound_exit_nhsound)("done2");
+
             exit_nhwindows((char *) 0);
-            NH_abort();
+            NH_abort(NULL);
         } else if (c == 'q')
             done_stopprint++;
     }
 #endif
-#ifndef LINT
     done(QUIT);
-#endif
     return ECMD_OK;
 }
 
@@ -380,7 +619,9 @@ done_intr(int sig_unused UNUSED)
     done_stopprint++;
     (void) signal(SIGINT, SIG_IGN);
 #if defined(UNIX) || defined(VMS)
+#ifndef VMSVSI
     (void) signal(SIGQUIT, SIG_IGN);
+#endif
 #endif
     return;
 }
@@ -390,7 +631,9 @@ done_intr(int sig_unused UNUSED)
 static void
 done_hangup(int sig)
 {
-    g.program_state.done_hup++;
+#ifdef HANGUPHANDLING
+    gp.program_state.done_hup++;
+#endif
     sethanguphandler((void (*)(int)) SIG_IGN);
     done_intr(sig);
     return;
@@ -406,9 +649,8 @@ done_in_by(struct monst *mtmp, int how)
 {
     char buf[BUFSZ];
     struct permonst *mptr = mtmp->data,
-                    *champtr = ((mtmp->cham >= LOW_PM)
-                                   ? &mons[mtmp->cham]
-                                   : mptr);
+                    *champtr = (mtmp->cham >= LOW_PM) ? &mons[mtmp->cham]
+                                                      : mptr;
     boolean distorted = (boolean) (Hallucination && canspotmon(mtmp)),
             mimicker = (M_AP_TYPE(mtmp) == M_AP_MONSTER),
             imitator = (mptr != champtr || mimicker);
@@ -416,19 +658,19 @@ done_in_by(struct monst *mtmp, int how)
     You((how == STONING) ? "turn to stone..." : "die...");
     mark_synch(); /* flush buffered screen output */
     buf[0] = '\0';
-    g.killer.format = KILLED_BY_AN;
+    gk.killer.format = KILLED_BY_AN;
     /* "killed by the high priest of Crom" is okay,
        "killed by the high priest" alone isn't */
     if ((mptr->geno & G_UNIQ) != 0 && !(imitator && !mimicker)
         && !(mptr == &mons[PM_HIGH_CLERIC] && !mtmp->ispriest)) {
         if (!type_is_pname(mptr))
             Strcat(buf, "the ");
-        g.killer.format = KILLED_BY;
+        gk.killer.format = KILLED_BY;
     }
     /* _the_ <invisible> <distorted> ghost of Dudley */
     if (mptr == &mons[PM_GHOST] && has_mgivenname(mtmp)) {
         Strcat(buf, "the ");
-        g.killer.format = KILLED_BY;
+        gk.killer.format = KILLED_BY;
     }
     (void) monhealthdescr(mtmp, TRUE, eos(buf));
     if (mtmp->minvis)
@@ -439,7 +681,7 @@ done_in_by(struct monst *mtmp, int how)
     if (imitator) {
         char shape[BUFSZ];
         const char *realnm = pmname(champtr, Mgender(mtmp)),
-                             *fakenm = pmname(mptr, Mgender(mtmp));
+                   *fakenm = pmname(mptr, Mgender(mtmp));
         boolean alt = is_vampshifter(mtmp);
 
         if (mimicker) {
@@ -479,7 +721,7 @@ done_in_by(struct monst *mtmp, int how)
                                    : mtmp->female ? "Ms. " : "Mr. ";
 
         Sprintf(eos(buf), "%s%s, the shopkeeper", honorific, shknm);
-        g.killer.format = KILLED_BY;
+        gk.killer.format = KILLED_BY;
     } else if (mtmp->ispriest || mtmp->isminion) {
         /* m_monnam() suppresses "the" prefix plus "invisible", and
            it overrides the effect of Hallucination on priestname() */
@@ -490,12 +732,13 @@ done_in_by(struct monst *mtmp, int how)
             Sprintf(eos(buf), " called %s", MGIVENNAME(mtmp));
     }
 
-    Strcpy(g.killer.name, buf);
+    Strcpy(gk.killer.name, buf);
 
     /* might need to fix up multi_reason if 'mtmp' caused the reason */
-    if (g.multi_reason
-        && g.multi_reason > g.multireasonbuf
-        && g.multi_reason < g.multireasonbuf + sizeof g.multireasonbuf - 1) {
+    if (gm.multi_reason
+        && gm.multi_reason > gm.multireasonbuf
+        && gm.multi_reason
+           < gm.multireasonbuf + sizeof gm.multireasonbuf - 1) {
         char reasondummy, *p;
         unsigned reasonmid = 0;
 
@@ -507,17 +750,17 @@ done_in_by(struct monst *mtmp, int how)
          * death reason becomes "Killed by a ghoul, while paralyzed."
          * instead of "Killed by a ghoul, while paralyzed by a ghoul."
          * (3.6.x gave "Killed by a ghoul, while paralyzed by a monster."
-         * which is potenitally misleading when the monster is also
+         * which is potentially misleading when the monster is also
          * the killer.)
          *
          * Note that if the hero is life-saved and then killed again
          * before the helplessness has cleared, the second death will
          * report the truncated helplessness reason even if some other
-         * monster peforms the /coup de grace/.
+         * monster performs the /coup de grace/.
          */
-        if (sscanf(g.multireasonbuf, "%u:%c", &reasonmid, &reasondummy) == 2
+        if (sscanf(gm.multireasonbuf, "%u:%c", &reasonmid, &reasondummy) == 2
             && mtmp->m_id == reasonmid) {
-            if ((p = index(g.multireasonbuf, ' ')) != 0)
+            if ((p = strchr(gm.multireasonbuf, ' ')) != 0)
                 *p = '\0';
         }
     }
@@ -533,10 +776,10 @@ done_in_by(struct monst *mtmp, int how)
      */
     if (mptr->mlet == S_WRAITH)
         u.ugrave_arise = PM_WRAITH;
-    else if (mptr->mlet == S_MUMMY && g.urace.mummynum != NON_PM)
-        u.ugrave_arise = g.urace.mummynum;
-    else if (zombie_maker(mtmp) && zombie_form(g.youmonst.data) != NON_PM)
-        u.ugrave_arise = zombie_form(g.youmonst.data);
+    else if (mptr->mlet == S_MUMMY && gu.urace.mummynum != NON_PM)
+        u.ugrave_arise = gu.urace.mummynum;
+    else if (zombie_maker(mtmp) && gu.urace.zombienum != NON_PM)
+        u.ugrave_arise = gu.urace.zombienum;
     else if (mptr->mlet == S_VAMPIRE && Race_if(PM_HUMAN))
         u.ugrave_arise = PM_VAMPIRE;
     else if (mptr == &mons[PM_GHOUL])
@@ -544,7 +787,7 @@ done_in_by(struct monst *mtmp, int how)
     /* this could happen if a high-end vampire kills the hero
        when ordinary vampires are genocided; ditto for wraiths */
     if (u.ugrave_arise >= LOW_PM
-        && (g.mvitals[u.ugrave_arise].mvflags & G_GENOD))
+        && (gm.mvitals[u.ugrave_arise].mvflags & G_GENOD))
         u.ugrave_arise = NON_PM;
 
     done(how);
@@ -575,17 +818,17 @@ fixup_death(int how)
 {
     int i;
 
-    if (g.multi_reason) {
+    if (gm.multi_reason) {
         for (i = 0; i < SIZE(death_fixups); ++i)
             if (death_fixups[i].why == how
-                && !strcmp(death_fixups[i].exclude, g.multi_reason)) {
+                && !strcmp(death_fixups[i].exclude, gm.multi_reason)) {
                 if (death_fixups[i].include) /* substitute alternate reason */
-                    g.multi_reason = death_fixups[i].include;
+                    gm.multi_reason = death_fixups[i].include;
                 else /* remove the helplessness reason */
-                    g.multi_reason = (char *) 0;
-                g.multireasonbuf[0] = '\0'; /* dynamic buf stale either way */
+                    gm.multi_reason = (char *) 0;
+                gm.multireasonbuf[0] = '\0'; /* dynamic buf stale either way */
                 if (death_fixups[i].unmulti) /* possibly hide helplessness */
-                    g.multi = 0L;
+                    gm.multi = 0L;
                 break;
             }
     }
@@ -598,25 +841,28 @@ fixup_death(int how)
 DISABLE_WARNING_FORMAT_NONLITERAL
 
 /*VARARGS1*/
-void
+ATTRNORETURN void
 panic VA_DECL(const char *, str)
 {
+    char buf[BUFSZ];
     VA_START(str);
     VA_INIT(str, char *);
 
-    if (g.program_state.panicking++)
-        NH_abort(); /* avoid loops - this should never happen*/
+    if (gp.program_state.panicking++)
+        NH_abort(NULL); /* avoid loops - this should never happen*/
 
     if (iflags.window_inited) {
         raw_print("\r\nOops...");
         wait_synch(); /* make sure all pending output gets flushed */
+        if (soundprocs.sound_exit_nhsound)
+            (*soundprocs.sound_exit_nhsound)("panic");
         exit_nhwindows((char *) 0);
         iflags.window_inited = 0; /* they're gone; force raw_print()ing */
     }
 
-    raw_print(g.program_state.gameover
+    raw_print(gp.program_state.gameover
                   ? "Postgame wrapup disrupted."
-                  : !g.program_state.something_worth_saving
+                  : !gp.program_state.something_worth_saving
                         ? "Program initialization has failed."
                         : "Suddenly, the dungeon collapses.");
 #ifndef MICRO
@@ -624,14 +870,15 @@ panic VA_DECL(const char *, str)
     if (!wizard)
         raw_printf("Report the following error to \"%s\" or at \"%s\".",
                    DEVTEAM_EMAIL, DEVTEAM_URL);
-    else if (g.program_state.something_worth_saving)
+    else if (gp.program_state.something_worth_saving)
         raw_print("\nError save file being written.\n");
 #else /* !NOTIFY_NETHACK_BUGS */
     if (!wizard) {
-        const char *maybe_rebuild = !g.program_state.something_worth_saving
+        const char *maybe_rebuild = !gp.program_state.something_worth_saving
                                      ? "."
                                      : "\nand it may be possible to rebuild.";
 
+// XXX this is probably wrong if defined(CRASHREPORT)
         if (sysopt.support)
             raw_printf("To report this error, %s%s", sysopt.support,
                        maybe_rebuild);
@@ -646,7 +893,7 @@ panic VA_DECL(const char *, str)
     /* XXX can we move this above the prints?  Then we'd be able to
      * suppress "it may be possible to rebuild" based on dosave0()
      * or say it's NOT possible to rebuild. */
-    if (g.program_state.something_worth_saving && !iflags.debug_fuzzer) {
+    if (gp.program_state.something_worth_saving && !iflags.debug_fuzzer) {
         set_error_savefile();
         if (dosave0()) {
             /* os/win port specific recover instructions */
@@ -655,23 +902,19 @@ panic VA_DECL(const char *, str)
         }
     }
 #endif /* !MICRO */
-    {
-        char buf[BUFSZ];
 
-#if !defined(NO_VSNPRINTF)
-        (void) vsnprintf(buf, sizeof buf, str, VA_ARGS);
-#else
-        Vsprintf(buf, str, VA_ARGS);
-#endif
-        raw_print(buf);
-        paniclog("panic", buf);
-    }
+    (void) vsnprintf(buf, sizeof buf, str, VA_ARGS);
+    raw_print(buf);
+    paniclog("panic", buf);
+
 #ifdef WIN32
     interject(INTERJECT_PANIC);
 #endif
 #if defined(UNIX) || defined(VMS) || defined(LATTICE) || defined(WIN32)
+# ifndef CRASHREPORT
     if (wizard)
-        NH_abort(); /* generate core dump */
+# endif
+        NH_abort(buf); /* generate core dump */
 #endif
     VA_END();
     really_done(PANICKED);
@@ -686,7 +929,7 @@ should_query_disclose_option(int category, char *defquery)
     char disclose, *dop;
 
     *defquery = 'n';
-    if ((dop = index(disclosure_options, category)) != 0) {
+    if ((dop = strchr(disclosure_options, category)) != 0) {
         idx = (int) (dop - disclosure_options);
         if (idx < 0 || idx >= NUM_DISCLOSURE_OPTIONS) {
             impossible(
@@ -729,9 +972,9 @@ dump_plines(void)
 
     Strcpy(buf, " "); /* one space for indentation */
     putstr(0, 0, "Latest messages:");
-    for (i = 0, j = (int) g.saved_pline_index; i < DUMPLOG_MSG_COUNT;
+    for (i = 0, j = (int) gs.saved_pline_index; i < DUMPLOG_MSG_COUNT;
          ++i, j = (j + 1) % DUMPLOG_MSG_COUNT) {
-        strp = &g.saved_plines[j];
+        strp = &gs.saved_plines[j];
         if (*strp) {
             copynchars(&buf[1], *strp, BUFSZ - 1 - 1);
             putstr(0, 0, buf);
@@ -779,13 +1022,14 @@ dump_everything(
 
     /* character name and basic role info */
     Sprintf(pbuf, "%s, %s %s %s %s",
-            g.plname, aligns[1 - u.ualign.type].adj,
-            genders[flags.female].adj, g.urace.adj,
-            (flags.female && g.urole.name.f) ? g.urole.name.f
-                                             : g.urole.name.m);
+            gp.plname, aligns[1 - u.ualign.type].adj,
+            genders[flags.female].adj, gu.urace.adj,
+            (flags.female && gu.urole.name.f) ? gu.urole.name.f
+                                             : gu.urole.name.m);
     putstr(0, 0, pbuf);
     putstr(0, 0, "");
 
+    /* info about current game state */
     dump_map();
     putstr(0, 0, do_statusline1());
     putstr(0, 0, do_statusline2());
@@ -793,13 +1037,15 @@ dump_everything(
 
     dump_plines();
     putstr(0, 0, "");
-    show_gamelog((how >= PANICKED) ? ENL_GAMEOVERALIVE : ENL_GAMEOVERDEAD);
-    putstr(0, 0, "");
     putstr(0, 0, "Inventory:");
     (void) display_inventory((char *) 0, TRUE);
-    container_contents(g.invent, TRUE, TRUE, FALSE);
+    container_contents(gi.invent, TRUE, TRUE, FALSE);
     enlightenment((BASICENLIGHTENMENT | MAGICENLIGHTENMENT),
                   (how >= PANICKED) ? ENL_GAMEOVERALIVE : ENL_GAMEOVERDEAD);
+    putstr(0, 0, "");
+
+    /* overview of the game up to this point */
+    show_gamelog((how >= PANICKED) ? ENL_GAMEOVERALIVE : ENL_GAMEOVERDEAD);
     putstr(0, 0, "");
     list_vanquished('d', FALSE); /* 'd' => 'y' */
     putstr(0, 0, "");
@@ -823,7 +1069,7 @@ disclose(int how, boolean taken)
     char qbuf[QBUFSZ];
     boolean ask = FALSE;
 
-    if (g.invent && !done_stopprint) {
+    if (gi.invent && !done_stopprint) {
         if (taken)
             Sprintf(qbuf, "Do you want to see what you had when you %s?",
                     (how == QUIT) ? "quit" : "died");
@@ -831,11 +1077,12 @@ disclose(int how, boolean taken)
             Strcpy(qbuf, "Do you want your possessions identified?");
 
         ask = should_query_disclose_option('i', &defquery);
-        c = ask ? yn_function(qbuf, ynqchars, defquery) : defquery;
+        c = ask ? yn_function(qbuf, ynqchars, defquery, TRUE) : defquery;
         if (c == 'y') {
-            /* caller has already ID'd everything */
-            (void) display_inventory((char *) 0, FALSE);
-            container_contents(g.invent, TRUE, TRUE, FALSE);
+            /* caller has already ID'd everything; we pass 'want_reply=True'
+               to force display_pickinv() to avoid using WIN_INVENT */
+            (void) display_inventory((char *) 0, TRUE);
+            container_contents(gi.invent, TRUE, TRUE, FALSE);
         }
         if (c == 'q')
             done_stopprint++;
@@ -844,7 +1091,7 @@ disclose(int how, boolean taken)
     if (!done_stopprint) {
         ask = should_query_disclose_option('a', &defquery);
         c = ask ? yn_function("Do you want to see your attributes?", ynqchars,
-                              defquery)
+                              defquery, TRUE)
                 : defquery;
         if (c == 'y')
             enlightenment((BASICENLIGHTENMENT | MAGICENLIGHTENMENT),
@@ -876,7 +1123,7 @@ disclose(int how, boolean taken)
                        to plural vs singular for conducts but the less
                        specific "conduct and achievements" is sufficient */
                     (acnt > 0) ? " and achievements" : "");
-            c = yn_function(qbuf, ynqchars, defquery);
+            c = yn_function(qbuf, ynqchars, defquery, TRUE);
         } else {
             c = defquery;
         }
@@ -889,7 +1136,7 @@ disclose(int how, boolean taken)
     if (!done_stopprint) {
         ask = should_query_disclose_option('o', &defquery);
         c = ask ? yn_function("Do you want to see the dungeon overview?",
-                              ynqchars, defquery)
+                              ynqchars, defquery, TRUE)
                 : defquery;
         if (c == 'y')
             show_overview((how >= PANICKED) ? 1 : 2, how);
@@ -903,6 +1150,7 @@ static void
 savelife(int how)
 {
     int uhpmin;
+    int givehp = 50 + 10 * (ACURR(A_CON) / 2);
 
     /* life-drain/level-loss to experience level 0 kills without actually
        reducing ulevel below 1, but include this for bulletproofing */
@@ -911,9 +1159,9 @@ savelife(int how)
     uhpmin = minuhpmax(10);
     if (u.uhpmax < uhpmin)
         setuhpmax(uhpmin);
-    u.uhp = u.uhpmax;
+    u.uhp = min(u.uhpmax, givehp);
     if (Upolyd) /* Unchanging, or death which bypasses losing hit points */
-        u.mh = u.mhmax;
+        u.mh = min(u.mhmax, givehp);
     if (u.uhunger < 500 || how == CHOKING) {
         init_uhunger();
     }
@@ -922,30 +1170,30 @@ savelife(int how)
     if ((Sick & TIMEOUT) == 1L) {
         make_sick(0L, (char *) 0, FALSE, SICK_ALL);
     }
-    g.nomovemsg = "You survived that attempt on your life.";
-    g.context.move = 0;
+    gn.nomovemsg = "You survived that attempt on your life.";
+    gc.context.move = 0;
 
-    g.multi = -1; /* can't move again during the current turn */
+    gm.multi = -1; /* can't move again during the current turn */
     /* in case being life-saved is immediately followed by being killed
        again (perhaps due to zap rebound); this text will be appended to
           "killed by <something>, while "
        in high scores entry, if any, and in logfile (but not on tombstone) */
-    g.multi_reason = Role_if(PM_TOURIST) ? "being toyed with by Fate"
-                                         : "attempting to cheat Death";
+    gm.multi_reason = Role_if(PM_TOURIST) ? "being toyed with by Fate"
+                                          : "attempting to cheat Death";
 
     if (u.utrap && u.utraptype == TT_LAVA)
         reset_utrap(FALSE);
-    g.context.botl = TRUE;
+    gc.context.botl = TRUE;
     u.ugrave_arise = NON_PM;
     HUnchanging = 0L;
     curs_on_u();
-    if (!g.context.mon_moving)
+    if (!gc.context.mon_moving)
         endmultishot(FALSE);
     if (u.uswallow) {
         /* might drop hero onto a trap that kills her all over again */
         expels(u.ustuck, u.ustuck->data, TRUE);
     } else if (u.ustuck) {
-        if (Upolyd && sticks(g.youmonst.data))
+        if (Upolyd && sticks(gy.youmonst.data))
             You("release %s.", mon_nam(u.ustuck));
         else
             pline("%s releases you.", Monnam(u.ustuck));
@@ -971,18 +1219,19 @@ get_valuables(struct obj *list) /* inventory or container contents */
             continue;
         } else if (obj->oclass == AMULET_CLASS) {
             i = obj->otyp - FIRST_AMULET;
-            if (!g.amulets[i].count) {
-                g.amulets[i].count = obj->quan;
-                g.amulets[i].typ = obj->otyp;
+            if (!ga.amulets[i].count) {
+                ga.amulets[i].count = obj->quan;
+                ga.amulets[i].typ = obj->otyp;
             } else
-                g.amulets[i].count += obj->quan; /* always adds one */
-        } else if (obj->oclass == GEM_CLASS && obj->otyp < LUCKSTONE) {
-            i = min(obj->otyp, LAST_GEM + 1) - FIRST_GEM;
-            if (!g.gems[i].count) {
-                g.gems[i].count = obj->quan;
-                g.gems[i].typ = obj->otyp;
+                ga.amulets[i].count += obj->quan; /* always adds one */
+        } else if (obj->oclass == GEM_CLASS && obj->otyp <= LAST_GLASS_GEM) {
+            /* last+1: combine all glass gems into one slot */
+            i = min(obj->otyp, LAST_REAL_GEM + 1) - FIRST_REAL_GEM;
+            if (!gg.gems[i].count) {
+                gg.gems[i].count = obj->quan;
+                gg.gems[i].typ = obj->otyp;
             } else
-                g.gems[i].count += obj->quan;
+                gg.gems[i].count += obj->quan;
         }
     return;
 }
@@ -992,8 +1241,9 @@ get_valuables(struct obj *list) /* inventory or container contents */
  *  as easily use qsort, but we don't care about efficiency here.
  */
 static void
-sort_valuables(struct valuable_data list[],
-               int size) /* max value is less than 20 */
+sort_valuables(
+    struct valuable_data list[],
+    int size) /* max value is less than 20 */
 {
     register int i, j;
     struct valuable_data ltmp;
@@ -1003,12 +1253,11 @@ sort_valuables(struct valuable_data list[],
         if (list[i].count == 0)
             continue;   /* empty slot */
         ltmp = list[i]; /* structure copy */
-        for (j = i; j > 0; --j)
+        for (j = i; j > 0; --j) {
             if (list[j - 1].count >= ltmp.count)
                 break;
-            else {
-                list[j] = list[j - 1];
-            }
+            list[j] = list[j - 1];
+        }
         list[j] = ltmp;
     }
     return;
@@ -1060,7 +1309,7 @@ done_object_cleanup(void)
      * any inventory.  Saving bones with an active light source in limbo
      * would trigger an 'object not local' panic.
      *
-     * We used to use dealloc_obj() on g.thrownobj and g.kickedobj but
+     * We used to use dealloc_obj() on gt.thrownobj and gk.kickedobj but
      * that keeps them out of bones and could leave uball in a confused
      * state (gone but still attached).  Place them on the map but
      * bypass flooreffects().  That could lead to minor anomalies in
@@ -1075,13 +1324,13 @@ done_object_cleanup(void)
        be incorrect (perhaps killed by divine lightning when throwing at
        a temple priest?) but this should be better than just vanishing
        (fragile stuff should be taken care of before getting here) */
-    if (g.thrownobj && g.thrownobj->where == OBJ_FREE) {
-        place_object(g.thrownobj, ox, oy);
-        stackobj(g.thrownobj), g.thrownobj = 0;
+    if (gt.thrownobj && gt.thrownobj->where == OBJ_FREE) {
+        place_object(gt.thrownobj, ox, oy);
+        stackobj(gt.thrownobj), gt.thrownobj = 0;
     }
-    if (g.kickedobj && g.kickedobj->where == OBJ_FREE) {
-        place_object(g.kickedobj, ox, oy);
-        stackobj(g.kickedobj), g.kickedobj = 0;
+    if (gk.kickedobj && gk.kickedobj->where == OBJ_FREE) {
+        place_object(gk.kickedobj, ox, oy);
+        stackobj(gk.kickedobj), gk.kickedobj = 0;
     }
     /* if Punished hero dies during level change or dies or quits while
        swallowed, uball and uchain will be in limbo; put them on floor
@@ -1135,6 +1384,76 @@ artifact_score(
     }
 }
 
+/* when dying while running the debug fuzzer, [almost] always keep going;
+   True: forced survival; False: doomed unless wearing life-save amulet */
+static boolean
+fuzzer_savelife(int how)
+{
+    /*
+     * Some debugging code pulled out of done() to unclutter it.
+     * 'done_seq' is maintained in done().
+     */
+    if (!gp.program_state.panicking
+        && how != PANICKED && how != TRICKED
+        /* Guard against getting stuck in a loop if we die in one of
+         * the few ways where life-saving isn't effective (cited case
+         * was burning in lava when the level was too full to allow
+         * teleporting to safety).  Skip the life-save attempt if we've
+         * died on the same move more than 100 times; give up instead.
+         * [Note: 100 deaths on the same move may seem excessive but it
+         * has been demonstrated that a limit of 20 was not enough.] */
+        && (gd.done_seq++ < gh.hero_seq + 100L)) {
+        savelife(how);
+
+        /* periodically restore characteristics plus lost experience
+           levels or cure lycanthropy or both; those conditions make the
+           hero vulnerable to repeat deaths (often by becoming surrounded
+           while being too encumbered to do anything) */
+        if (!rn2((gd.done_seq > gh.hero_seq + 2L) ? 2 : 10)) {
+            struct obj *potion;
+            int propidx, proptim, remedies = 0;
+
+            /* get rid of temporary potion with obfree() rather than useup()
+               because it doesn't get entered into inventory */
+            if (u.ulycn >= LOW_PM && !rn2(3)) {
+                potion = mksobj(POT_WATER, TRUE, FALSE);
+                bless(potion);
+                (void) peffects(potion);
+                obfree(potion, (struct obj *) 0);
+                ++remedies;
+            }
+            if (!remedies || rn2(3)) {
+                potion = mksobj(POT_RESTORE_ABILITY, TRUE, FALSE);
+                bless(potion);
+                (void) peffects(potion);
+                obfree(potion, (struct obj *) 0);
+                ++remedies;
+            }
+            if (!rn2(3 + 3 * remedies)) {
+                /* confer temporary resistances for first 8 properities:
+                   fire, cold, sleep, disint, shock, poison, acid, stone */
+                for (propidx = 1; propidx <= 8; ++propidx) {
+                    if (!u.uprops[propidx].intrinsic
+                        && !u.uprops[propidx].extrinsic
+                        && (proptim = rn2(3)) > 0) /* 0..2 */
+                        set_itimeout(&u.uprops[propidx].intrinsic,
+                                     (long) (2 * proptim + 1)); /* 3 or 5 */
+                }
+                ++remedies;
+            }
+            if (!rn2(5 + 5 * remedies)) {
+                ; /* might confer temporary Antimagic (magic resistance)
+                   * or even Invulnerable */
+            }
+        }
+        /* clear stale cause of death info after life-saving */
+        gk.killer.name[0] = '\0';
+        gk.killer.format = 0;
+        return TRUE;
+    }
+    return FALSE; /* panic or too many consecutive deaths */
+}
+
 /* Be careful not to call panic from here! */
 void
 done(int how)
@@ -1142,57 +1461,49 @@ done(int how)
     boolean survive = FALSE;
 
     if (how == TRICKED) {
-        if (g.killer.name[0]) {
-            paniclog("trickery", g.killer.name);
-            g.killer.name[0] = '\0';
+        if (gk.killer.name[0]) {
+            paniclog("trickery", gk.killer.name);
+            gk.killer.name[0] = '\0';
         }
         if (wizard) {
             You("are a very tricky wizard, it seems.");
-            g.killer.format = KILLED_BY_AN; /* reset to 0 */
+            gk.killer.format = KILLED_BY_AN; /* reset to 0 */
             return;
         }
     }
-    if (g.program_state.panicking
+    if (gp.program_state.panicking
 #ifdef HANGUPHANDLING
-        || g.program_state.done_hup
+        || gp.program_state.done_hup
 #endif
         || (how == QUIT && done_stopprint)) {
         /* skip status update if panicking or disconnected
            or answer of 'q' to "Really quit?" */
-        g.context.botl = g.context.botlx = iflags.time_botl = FALSE;
+        gc.context.botl = gc.context.botlx = iflags.time_botl = FALSE;
     } else {
         /* otherwise force full status update */
-        g.context.botlx = TRUE;
+        gc.context.botlx = TRUE;
         bot();
     }
 
-    if (iflags.debug_fuzzer) {
-        if (!(g.program_state.panicking || how == PANICKED)) {
-            savelife(how);
-            /* periodically restore characteristics and lost exp levels
-               or cure lycanthropy */
-            if (!rn2(10)) {
-                struct obj *potion = mksobj((u.ulycn > LOW_PM && !rn2(3))
-                                            ? POT_WATER : POT_RESTORE_ABILITY,
-                                            TRUE, FALSE);
+    /* hero_seq is (moves<<3 + n) where n is number of moves made
+       by the hero on the current turn (since the 'moves' variable
+       actually counts turns); its details shouldn't matter here;
+       used by fuzzer_savelife() and for hangup below */
+    if (gd.done_seq < gh.hero_seq)
+        gd.done_seq = gh.hero_seq;
 
-                bless(potion);
-                (void) peffects(potion); /* always -1 for restore ability */
-                /* not useup(); we haven't put this potion into inventory */
-                obfree(potion, (struct obj *) 0);
-            }
-            g.killer.name[0] = '\0';
-            g.killer.format = 0;
+    if (iflags.debug_fuzzer) {
+        if (fuzzer_savelife(how))
             return;
-        }
-    } else
-    if (how == ASCENDED || (!g.killer.name[0] && how == GENOCIDED))
-        g.killer.format = NO_KILLER_PREFIX;
+    }
+
+    if (how == ASCENDED || (!gk.killer.name[0] && how == GENOCIDED))
+        gk.killer.format = NO_KILLER_PREFIX;
     /* Avoid killed by "a" burning or "a" starvation */
-    if (!g.killer.name[0] && (how == STARVING || how == BURNING))
-        g.killer.format = KILLED_BY;
-    if (!g.killer.name[0] || how >= PANICKED)
-        Strcpy(g.killer.name, deaths[how]);
+    if (!gk.killer.name[0] && (how == STARVING || how == BURNING))
+        gk.killer.format = KILLED_BY;
+    if (!gk.killer.name[0] || how >= PANICKED)
+        Strcpy(gk.killer.name, deaths[how]);
 
     if (how < PANICKED) {
         u.umortality++;
@@ -1203,11 +1514,12 @@ done(int how)
                negative (-1 is used as a flag in some circumstances
                which don't apply when actually dying due to HP loss) */
             u.uhp = u.mh = 0;
-            g.context.botl = 1;
+            gc.context.botl = 1;
         }
     }
     if (Lifesaved && (how <= GENOCIDED)) {
         pline("But wait...");
+        /* assumes that only one type of item confers LifeSaved property */
         makeknown(AMULET_OF_LIFE_SAVING);
         Your("medallion %s!", !Blind ? "begins to glow" : "feels warm");
         if (how == CHOKING)
@@ -1230,6 +1542,12 @@ done(int how)
     }
     /* explore and wizard modes offer player the option to keep playing */
     if (!survive && (wizard || discover) && how <= GENOCIDED
+#ifdef HANGUPHANDLING
+        /* if hangup has occurred, the only possible answer to a paranoid
+           query is 'no'; we want 'no' as the default for "Die?" but can't
+           accept it more than once if there's no user supplying it */
+        && !(gp.program_state.done_hup && gd.done_seq++ == gh.hero_seq)
+#endif
         && !paranoid_query(ParanoidDie, "Die?")) {
         pline("OK, so you don't %s.", (how == CHOKING) ? "choke" : "die");
         iflags.last_msg = PLNMSG_OK_DONT_DIE;
@@ -1238,8 +1556,8 @@ done(int how)
     }
 
     if (survive) {
-        g.killer.name[0] = '\0';
-        g.killer.format = KILLED_BY_AN; /* reset to 0 */
+        gk.killer.name[0] = '\0';
+        gk.killer.format = KILLED_BY_AN; /* reset to 0 */
         return;
     }
     really_done(how);
@@ -1262,11 +1580,11 @@ really_done(int how)
     /*
      *  The game is now over...
      */
-    g.program_state.gameover = 1;
+    gp.program_state.gameover = 1;
     /* in case of a subsequent panic(), there's no point trying to save */
-    g.program_state.something_worth_saving = 0;
+    gp.program_state.something_worth_saving = 0;
 #ifdef HANGUPHANDLING
-    if (g.program_state.done_hup)
+    if (gp.program_state.done_hup)
         done_stopprint++;
 #endif
     /* render vision subsystem inoperative */
@@ -1274,7 +1592,7 @@ really_done(int how)
 
     /* maybe use up active invent item(s), place thrown/kicked missile,
        deal with ball and chain possibly being temporarily off the map */
-    if (!g.program_state.panicking)
+    if (!gp.program_state.panicking)
         done_object_cleanup();
     /* in case we're panicking; normally cleared by done_object_cleanup() */
     iflags.perm_invent = FALSE;
@@ -1304,7 +1622,7 @@ really_done(int how)
      * On those rare occasions you get hosed immediately, go out
      * smiling... :-)  -3.
      */
-    if (g.moves <= 1 && how < PANICKED && !done_stopprint)
+    if (gm.moves <= 1 && how < PANICKED && !done_stopprint)
         pline("Do not pass Go.  Do not collect 200 %s.", currency(200L));
 
     if (have_windows)
@@ -1312,7 +1630,9 @@ really_done(int how)
 #ifndef NO_SIGNAL
     (void) signal(SIGINT, (SIG_RET_TYPE) done_intr);
 #if defined(UNIX) || defined(VMS) || defined(__EMX__)
+#ifndef VMSVSI
     (void) signal(SIGQUIT, (SIG_RET_TYPE) done_intr);
+#endif
     sethanguphandler(done_hangup);
 #endif
 #endif /* NO_SIGNAL */
@@ -1334,21 +1654,21 @@ really_done(int how)
                 have been genocided:  genocide could occur after hero is
                 already infected or hero could eat a glob of one created
                 before genocide; don't try to arise as one if they're gone */
-             && !(g.mvitals[PM_GREEN_SLIME].mvflags & G_GENOD))
+             && !(gm.mvitals[PM_GREEN_SLIME].mvflags & G_GENOD))
         u.ugrave_arise = PM_GREEN_SLIME;
 
     if (how == QUIT) {
-        g.killer.format = NO_KILLER_PREFIX;
+        gk.killer.format = NO_KILLER_PREFIX;
         if (u.uhp < 1) {
             how = DIED;
             u.umortality++; /* skipped above when how==QUIT */
-            Strcpy(g.killer.name, "quit while already on Charon's boat");
+            Strcpy(gk.killer.name, "quit while already on Charon's boat");
         }
     }
     if (how == ESCAPED || how == PANICKED)
-        g.killer.format = NO_KILLER_PREFIX;
+        gk.killer.format = NO_KILLER_PREFIX;
 
-    fixup_death(how); /* actually, fixup g.multi_reason */
+    fixup_death(how); /* actually, fixup gm.multi_reason */
 
     if (how != PANICKED) {
         boolean silently = done_stopprint ? TRUE : FALSE;
@@ -1373,7 +1693,7 @@ really_done(int how)
          * Both are optional, so do it once here instead of duplicating
          * it in both of those places.
          */
-        for (obj = g.invent; obj; obj = obj->nobj) {
+        for (obj = gi.invent; obj; obj = obj->nobj) {
             discover_object(obj->otyp, TRUE, FALSE);
             obj->known = obj->bknown = obj->dknown = obj->rknown = 1;
             set_cknown_lknown(obj); /* set flags when applicable */
@@ -1407,7 +1727,7 @@ really_done(int how)
         dump_everything(how, endtime);
     }
 
-    /* if pets will contribute to score, populate g.mydogs list now
+    /* if pets will contribute to score, populate gm.mydogs list now
        (bones creation isn't a factor, but pline() messaging is; used to
        be done even sooner, but we need it to come after dump_everything()
        so that any accompanying pets are still on the map during dump) */
@@ -1421,15 +1741,18 @@ really_done(int how)
     /* grave creation should be after disclosure so it doesn't have
        this grave in the current level's features for #overview */
     if (bones_ok && u.ugrave_arise == NON_PM
-        && !(g.mvitals[u.umonnum].mvflags & G_NOCORPSE)) {
+        && !(gm.mvitals[u.umonnum].mvflags & G_NOCORPSE)) {
         /* Base corpse on race when not poly'd since original u.umonnum
            is based on role, and all role monsters are human. */
-        int mnum = !Upolyd ? g.urace.mnum : u.umonnum;
+        int mnum = !Upolyd ? gu.urace.mnum : u.umonnum,
+            was_already_grave = IS_GRAVE(levl[u.ux][u.uy].typ);
 
-        corpse = mk_named_object(CORPSE, &mons[mnum], u.ux, u.uy, g.plname);
-        Sprintf(pbuf, "%s, ", g.plname);
+        corpse = mk_named_object(CORPSE, &mons[mnum], u.ux, u.uy, gp.plname);
+        Sprintf(pbuf, "%s, ", gp.plname);
         formatkiller(eos(pbuf), sizeof pbuf - Strlen(pbuf), how, TRUE);
         make_grave(u.ux, u.uy, pbuf);
+        if (IS_GRAVE(levl[u.ux][u.uy].typ) && !was_already_grave)
+            levl[u.ux][u.uy].emptygrave = 1; /* corpse isn't buried */
     }
     pbuf[0] = '\0'; /* clear grave text; also lint suppression */
 
@@ -1437,7 +1760,7 @@ really_done(int how)
     {
         int deepest = deepest_lev_reached(FALSE);
 
-        umoney = money_cnt(g.invent);
+        umoney = money_cnt(gi.invent);
         tmp = u.umoney0;
         umoney += hidden_gold(TRUE); /* accumulate gold from containers */
         tmp = umoney - tmp;          /* net gain */
@@ -1484,7 +1807,7 @@ really_done(int how)
 
     /* update gold for the rip output, which can't use hidden_gold()
        (containers will be gone by then if bones just got saved...) */
-    g.done_money = umoney;
+    gd.done_money = umoney;
 
     /* clean up unneeded windows */
     if (have_windows) {
@@ -1520,20 +1843,20 @@ really_done(int how)
     }
 #endif
     if (u.uhave.amulet) {
-        Strcat(g.killer.name, " (with the Amulet)");
+        Strcat(gk.killer.name, " (with the Amulet)");
     } else if (how == ESCAPED) {
         if (Is_astralevel(&u.uz)) /* offered Amulet to wrong deity */
-            Strcat(g.killer.name, " (in celestial disgrace)");
+            Strcat(gk.killer.name, " (in celestial disgrace)");
         else if (carrying(FAKE_AMULET_OF_YENDOR))
-            Strcat(g.killer.name, " (with a fake Amulet)");
+            Strcat(gk.killer.name, " (with a fake Amulet)");
         /* don't bother counting to see whether it should be plural */
     }
 
-    Sprintf(pbuf, "%s %s the %s...", Goodbye(), g.plname,
+    Sprintf(pbuf, "%s %s the %s...", Goodbye(), gp.plname,
             (how != ASCENDED)
-                ? (const char *) ((flags.female && g.urole.name.f)
-                    ? g.urole.name.f
-                    : g.urole.name.m)
+                ? (const char *) ((flags.female && gu.urole.name.f)
+                    ? gu.urole.name.f
+                    : gu.urole.name.m)
                 : (const char *) (flags.female ? "Demigoddess" : "Demigod"));
     dump_forward_putstr(endwin, 0, pbuf, done_stopprint);
     dump_forward_putstr(endwin, 0, "", done_stopprint);
@@ -1544,14 +1867,14 @@ really_done(int how)
         register struct val_list *val;
         register int i;
 
-        for (val = g.valuables; val->list; val++)
+        for (val = gv.valuables; val->list; val++)
             for (i = 0; i < val->size; i++) {
                 val->list[i].count = 0L;
             }
-        get_valuables(g.invent);
+        get_valuables(gi.invent);
 
         /* add points for collected valuables */
-        for (val = g.valuables; val->list; val++)
+        for (val = gv.valuables; val->list; val++)
             for (i = 0; i < val->size; i++)
                 if (val->list[i].count != 0L) {
                     tmp = val->list[i].count
@@ -1560,10 +1883,10 @@ really_done(int how)
                 }
 
         /* count the points for artifacts */
-        artifact_score(g.invent, TRUE, endwin);
+        artifact_score(gi.invent, TRUE, endwin);
 
-        g.viz_array[0][0] |= IN_SIGHT; /* need visibility for naming */
-        mtmp = g.mydogs;
+        gv.viz_array[0][0] |= IN_SIGHT; /* need visibility for naming */
+        mtmp = gm.mydogs;
         Strcpy(pbuf, "You");
         if (mtmp || Schroedingers_cat) {
             while (mtmp) {
@@ -1573,7 +1896,7 @@ really_done(int how)
                 mtmp = mtmp->nmon;
             }
             /* [it might be more robust to create a housecat and add it to
-               g.mydogs; it doesn't have to be placed on the map for that] */
+               gm.mydogs; it doesn't have to be placed on the map for that] */
             if (Schroedingers_cat) {
                 int mhp, m_lev = adj_lev(&mons[PM_HOUSECAT]);
 
@@ -1593,16 +1916,16 @@ really_done(int how)
         dump_forward_putstr(endwin, 0, pbuf, done_stopprint);
 
         if (!done_stopprint)
-            artifact_score(g.invent, FALSE, endwin); /* list artifacts */
+            artifact_score(gi.invent, FALSE, endwin); /* list artifacts */
 #ifdef DUMPLOG
         dump_redirect(TRUE);
         if (iflags.in_dumplog)
-            artifact_score(g.invent, FALSE, 0);
+            artifact_score(gi.invent, FALSE, 0);
         dump_redirect(FALSE);
 #endif
 
         /* list valuables here */
-        for (val = g.valuables; val->list; val++) {
+        for (val = gv.valuables; val->list; val++) {
             sort_valuables(val->list, val->size);
             for (i = 0; i < val->size && !done_stopprint; i++) {
                 int typ = val->list[i].typ;
@@ -1610,7 +1933,8 @@ really_done(int how)
 
                 if (count == 0L)
                     continue;
-                if (objects[typ].oc_class != GEM_CLASS || typ <= LAST_GEM) {
+                if (objects[typ].oc_class != GEM_CLASS
+                    || typ <= LAST_REAL_GEM) {
                     otmp = mksobj(typ, FALSE, FALSE);
                     discover_object(otmp->otyp, TRUE, FALSE);
                     otmp->known = 1;  /* for fake amulets */
@@ -1639,7 +1963,7 @@ really_done(int how)
                     (u.uz.dlevel < 0) ? "passed away" : ends[how]);
         } else {
             /* more conventional demise */
-            const char *where = g.dungeons[u.uz.dnum].dname;
+            const char *where = gd.dungeons[u.uz.dnum].dname;
 
             if (Is_astralevel(&u.uz))
                 where = "The Astral Plane";
@@ -1654,7 +1978,7 @@ really_done(int how)
     }
 
     Sprintf(pbuf, "and %ld piece%s of gold, after %ld move%s.", umoney,
-            plur(umoney), g.moves, plur(g.moves));
+            plur(umoney), gm.moves, plur(gm.moves));
     dump_forward_putstr(endwin, 0, pbuf, done_stopprint);
     Sprintf(pbuf,
             "You were level %d with a maximum of %d hit point%s when you %s.",
@@ -1667,6 +1991,11 @@ really_done(int how)
         destroy_nhwindow(endwin);
 
     dump_close_log();
+
+    /* shut down soundlib */
+    if (soundprocs.sound_exit_nhsound)
+        (*soundprocs.sound_exit_nhsound)("really_done");
+
     /*
      * "So when I die, the first thing I will see in Heaven is a score list?"
      *
@@ -1777,10 +2106,10 @@ container_contents(
 }
 
 /* should be called with either EXIT_SUCCESS or EXIT_FAILURE */
-void
+ATTRNORETURN void
 nh_terminate(int status)
 {
-    g.program_state.in_moveloop = 0; /* won't be returning to normal play */
+    gp.program_state.in_moveloop = 0; /* won't be returning to normal play */
 
     l_nhcore_call(NHCORE_GAME_EXIT);
 #ifdef MAC
@@ -1788,7 +2117,7 @@ nh_terminate(int status)
 #endif
     /* don't bother to try to release memory if we're in panic mode, to
        avoid trouble in case that happens to be due to memory problems */
-    if (!g.program_state.panicking) {
+    if (!gp.program_state.panicking) {
         freedynamicdata();
         dlb_cleanup();
         l_nhcore_done();
@@ -1802,10 +2131,10 @@ nh_terminate(int status)
      */
     /* don't call exit() if already executing within an exit handler;
        that would cancel any other pending user-mode handlers */
-    if (g.program_state.exiting)
+    if (gp.program_state.exiting)
         return;
 #endif
-    g.program_state.exiting = 1;
+    gp.program_state.exiting = 1;
     nethack_exit(status);
 }
 
@@ -1820,13 +2149,13 @@ delayed_killer(int id, int format, const char *killername)
         k = (struct kinfo *) alloc(sizeof (struct kinfo));
         (void) memset((genericptr_t) k, 0, sizeof (struct kinfo));
         k->id = id;
-        k->next = g.killer.next;
-        g.killer.next = k;
+        k->next = gk.killer.next;
+        gk.killer.next = k;
     }
 
     k->format = format;
     Strcpy(k->name, killername ? killername : "");
-    g.killer.name[0] = 0;
+    gk.killer.name[0] = 0;
 }
 
 struct kinfo *
@@ -1834,7 +2163,7 @@ find_delayed_killer(int id)
 {
     struct kinfo *k;
 
-    for (k = g.killer.next; k != (struct kinfo *) 0; k = k->next) {
+    for (k = gk.killer.next; k != (struct kinfo *) 0; k = k->next) {
         if (k->id == id)
             break;
     }
@@ -1844,11 +2173,11 @@ find_delayed_killer(int id)
 void
 dealloc_killer(struct kinfo *kptr)
 {
-    struct kinfo *prev = &g.killer, *k;
+    struct kinfo *prev = &gk.killer, *k;
 
     if (kptr == (struct kinfo *) 0)
         return;
-    for (k = g.killer.next; k != (struct kinfo *) 0; k = k->next) {
+    for (k = gk.killer.next; k != (struct kinfo *) 0; k = k->next) {
         if (k == kptr)
             break;
         prev = k;
@@ -1869,16 +2198,16 @@ save_killers(NHFILE *nhfp)
     struct kinfo *kptr;
 
     if (perform_bwrite(nhfp)) {
-        for (kptr = &g.killer; kptr != (struct kinfo *) 0; kptr = kptr->next) {
+        for (kptr = &gk.killer; kptr != (struct kinfo *) 0; kptr = kptr->next) {
             if (nhfp->structlevel)
                 bwrite(nhfp->fd, (genericptr_t)kptr, sizeof(struct kinfo));
         }
     }
     if (release_data(nhfp)) {
-        while (g.killer.next) {
-            kptr = g.killer.next->next;
-            free((genericptr_t) g.killer.next);
-            g.killer.next = kptr;
+        while (gk.killer.next) {
+            kptr = gk.killer.next->next;
+            free((genericptr_t) gk.killer.next);
+            gk.killer.next = kptr;
         }
     }
 }
@@ -1888,7 +2217,7 @@ restore_killers(NHFILE *nhfp)
 {
     struct kinfo *kptr;
 
-    for (kptr = &g.killer; kptr != (struct kinfo *) 0; kptr = kptr->next) {
+    for (kptr = &gk.killer; kptr != (struct kinfo *) 0; kptr = kptr->next) {
         if (nhfp->structlevel)
             mread(nhfp->fd, (genericptr_t)kptr, sizeof(struct kinfo));
         if (kptr->next) {

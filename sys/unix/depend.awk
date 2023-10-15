@@ -1,9 +1,14 @@
 # depend.awk -- awk script used to construct makefile dependencies
 # for nethack's source files (`make depend' support for Makefile.src).
-# $NHDT-Date: 1612127123 2021/01/31 21:05:23 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.13 $
+# $NHDT-Date: 1697316508 2023/10/14 20:48:28 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.16 $
 #
 # usage:
-#   cd src ; nawk -f depend.awk ../include/*.h list-of-.c/.cpp-files
+#   awk -f depend.awk ../include/*.h list-of-.c/.cpp-files
+#   (might need nawk or gawk instead of plain awk if it is really old)
+# meta usage:
+#   ( cd src ; make all ; cp ../sys/unix/Makefile.src ./Makefile ; \
+#     make depend ; cp ./Makefile ../sys/unix/Makefile.src ; \
+#     cd .. ; sh sys/unix/setup.sh [sys/unix/hints/FOO] )
 #
 # This awk program scans each file in sequence, looking for lines beginning
 # with `#include "' and recording the name inside the quotes.  For .h files,
@@ -85,7 +90,7 @@ function output_dep(				base, targ, moc)
   if (moc || base ~ /(.+\/)*qt_.*[.]cpp$/) {
     deps[file] = deps[file] " $(QTn_H)"
   }
-  if (base ~ /[.]cp*$/ || moc) {
+  if ((base ~ /[.]cp*$/ || moc) && !(file in filedone)) {
     #prior to very first .c|.cpp file, handle some special header file cases
     if (!c_count++)
       output_specials()
@@ -93,6 +98,9 @@ function output_dep(				base, targ, moc)
     targ = base;  sub("[.]cp*$", ".o", targ)
     #format and write the collected dependencies
     format_dep(targ, file)
+    #generated file tile.c can appear more than once in the list of files
+    #so track which files have already been handled; can't reuse done[] here
+    filedone[file]++;
   }
 }
 
@@ -129,6 +137,7 @@ function format_dep(target, source,		col, n, i, list, prefix, moc)
   #- printf("\t");  col += 8 - (col % 8);
   #- if (col == 8) { printf("\t"); col += 8 }
   source = depend("", source, 0)
+  sub(" +$", "", source)                #strip trailing spaces, if any
   n = split(source, list, " +")
   #first: leading whitespace yields empty 1st element; not sure why moc
   #files duplicate the target as next element but we need to skip that too
