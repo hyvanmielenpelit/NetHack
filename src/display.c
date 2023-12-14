@@ -1614,7 +1614,8 @@ docrt_flags(int refresh_flags)
     coordxy x, y;
     register struct rm *lev;
     boolean maponly = (refresh_flags & docrtMapOnly) != 0,
-            redrawonly = (refresh_flags & docrtRefresh) != 0;
+            redrawonly = (refresh_flags & docrtRefresh) != 0,
+            nocls = (refresh_flags & docrtNocls) != 0;
 
     if (!u.ux || gp.program_state.in_docrt)
         return; /* display isn't ready yet */
@@ -1646,7 +1647,8 @@ docrt_flags(int refresh_flags)
      *      + fills the physical screen with the symbol for rock
      *      + clears the glyph buffer
      */
-    cls();
+    if (!nocls)
+        cls();
 
     /* display memory */
     for (x = 1; x < COLNO; x++) {
@@ -2457,7 +2459,6 @@ map_glyphinfo(
      * as well as to regular display.)
      */
     if (is_you) {
-#ifdef TEXTCOLOR
         if (!iflags.use_color || Upolyd || glyph != hero_glyph) {
             ; /* color tweak not needed (!use_color) or not wanted (poly'd
                  or riding--which uses steed's color, not hero's) */
@@ -2471,7 +2472,6 @@ map_glyphinfo(
                by newsym()); we change the color to same as human hero */
             glyphinfo->gm.sym.color = HI_DOMESTIC;
         }
-#endif
         /* accessibility
           This unchanging display character for hero was requested by
           a blind player to enhance screen reader use.
@@ -2495,7 +2495,6 @@ map_glyphinfo(
     glyphinfo->glyph = glyph;
 }
 
-#ifdef TEXTCOLOR
 /*
  *  This must be the same order as used for buzz() in zap.c.
  *  The zap_color_ and altar_color_ enums are in decl.h.
@@ -2522,9 +2521,6 @@ int wallcolors[sokoban_walls + 1] = {
     /* CLR_GRAY, CLR_BROWN, CLR_RED, CLR_GRAY, CLR_BRIGHT_BLUE, */
 };
 
-#endif /* text color */
-
-#ifdef TEXTCOLOR
 #define zap_color(n) color = iflags.use_color ? zapcolors[n] : NO_COLOR
 #define cmap_color(n) color = iflags.use_color ? defsyms[n].color : NO_COLOR
 #define obj_color(n) color = iflags.use_color ? objects[n].oc_color : NO_COLOR
@@ -2537,19 +2533,6 @@ int wallcolors[sokoban_walls + 1] = {
     color = iflags.use_color ? explodecolors[n] : NO_COLOR
 #define wall_color(n) color = iflags.use_color ? wallcolors[n] : NO_COLOR
 #define altar_color(n) color = iflags.use_color ? altarcolors[n] : NO_COLOR
-#else /* no text color */
-
-#define zap_color(n)
-#define cmap_color(n)
-#define obj_color(n)
-#define mon_color(n)
-#define invis_color(n)
-#define pet_color(c)
-#define warn_color(n)
-#define explode_color(n)
-#define wall_color(n)
-#define altar_color(n)
-#endif
 
 #if 0
 #define is_objpile(x, y)                          \
@@ -2797,13 +2780,11 @@ reset_glyphmap(enum glyphmap_change_triggers trigger)
              */
             if (has_rogue_color) {
                 color = cmap_to_roguecolor(cmap);
-#ifdef TEXTCOLOR
             /* provide a visible difference if normal and lit corridor
                use the same symbol */
             } else if (cmap == S_litcorr
                        && sym == gs.showsyms[S_corr + SYM_OFF_P]) {
                 color = CLR_WHITE;
-#endif
             /* likewise for corridor and engraving-in-corridor */
             } else if (cmap == S_engrcorr
                        && (sym == gs.showsyms[S_corr + SYM_OFF_P]
@@ -2940,13 +2921,11 @@ reset_glyphmap(enum glyphmap_change_triggers trigger)
             if (gs.showsyms[pet_override] != ' ')
                 gmap->sym.symidx = SYM_PET_OVERRIDE + SYM_OFF_X;
         }
-#ifdef TEXTCOLOR
         /* Turn off color if no color defined, or rogue level w/o PC graphics.
          */
         if ((!has_color(color)
              || ((gg.glyphmap_perlevel_flags & GMAP_ROGUELEVEL)
                  && !has_rogue_color)) || !iflags.use_color)
-#endif
             color = NO_COLOR;
         gmap->sym.color = color;
     }

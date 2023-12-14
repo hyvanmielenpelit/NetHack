@@ -245,6 +245,8 @@ do_statusline2(void)
 void
 bot(void)
 {
+    if (gb.bot_disabled)
+        return;
     /* dosave() flags completion by setting u.uhp to -1; suppress_map_output()
        covers program_state.restoring and is used for status as well as map */
     if (u.uhp != -1 && gy.youmonst.data
@@ -265,6 +267,8 @@ bot(void)
 void
 timebot(void)
 {
+    if (gb.bot_disabled)
+        return;
     /* we're called when iflags.time_botl is set and general gc.context.botl
        is clear; iflags.time_botl gets set whenever gm.moves changes value
        so there's no benefit in tracking previous value to decide whether
@@ -1043,8 +1047,7 @@ condopt(int idx, boolean *addr, boolean negated)
         condtests[idx].enabled = negated ? FALSE : TRUE;
         condtests[idx].choice = condtests[idx].enabled;
         /* avoid lingering false positives if test is no longer run */
-        if (!condtests[idx].enabled)
-            condtests[idx].test = FALSE;
+        condtests[idx].test = FALSE;
     }
 }
 
@@ -1090,7 +1093,9 @@ parse_cond_option(boolean negated, char *opts)
     return 1;  /* !0 indicates error */
 }
 
-void
+/* display a menu of all available status condition options and let player
+   toggled them on or off; returns True iff any changes are made */
+boolean
 cond_menu(void)
 {
     static const char *const menutitle[2] = {
@@ -1103,7 +1108,8 @@ cond_menu(void)
     menu_item *picks = (menu_item *) 0;
     char mbuf[QBUFSZ];
     boolean showmenu = TRUE;
-    int clr = 0;
+    int clr = NO_COLOR;
+    boolean changed = FALSE;
 
     do {
         for (i = 0; i < CONDITION_COUNT; ++i) {
@@ -1125,8 +1131,7 @@ cond_menu(void)
                  clr, mbuf, MENU_ITEMFLAGS_SKIPINVERT);
         any = cg.zeroany;
         Sprintf(mbuf, "sorted %s", menutitle[gc.condmenu_sortorder]);
-        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0,
-                 iflags.menu_headings, clr, mbuf, MENU_ITEMFLAGS_NONE);
+        add_menu_heading(tmpwin, mbuf);
         for (i = 0; i < SIZE(condtests); i++) {
             idx = sequence[i];
             Sprintf(mbuf, "cond_%-14s", condtests[idx].useroption);
@@ -1164,14 +1169,16 @@ cond_menu(void)
         for (i = 0; i < CONDITION_COUNT; ++i)
             if (condtests[i].enabled != condtests[i].choice) {
                 condtests[i].enabled = condtests[i].choice;
-                gc.context.botl = TRUE;
+                condtests[idx].test = FALSE;
+                gc.context.botl = changed = TRUE;
             }
     }
-    return;
+    return changed;
 }
 
 /* called by all_options_conds() to get value for next cond_xyz option
-   so that #saveoptions can collect it and write the set into new RC file */
+   so that #saveoptions can collect it and write the set into new RC file.
+   returns zero-length string if the option is the default value. */
 boolean
 opt_next_cond(int indx, char *outbuf)
 {
@@ -1197,8 +1204,11 @@ opt_next_cond(int indx, char *outbuf)
      * wasn't used to choose their preferred order.
      */
 
-    Sprintf(outbuf, "%scond_%s", condtests[indx].enabled ? "" : "!",
-            condtests[indx].useroption);
+    if ((condtests[indx].opt == opt_in && condtests[indx].enabled)
+        || (condtests[indx].opt == opt_out && !condtests[indx].enabled)) {
+        Sprintf(outbuf, "%scond_%s", condtests[indx].enabled ? "" : "!",
+                condtests[indx].useroption);
+    }
     return TRUE;
 }
 
@@ -1679,8 +1689,8 @@ percentage(struct istat_s *bl, struct istat_s *maxbl)
     long lval;
     unsigned uval;
     unsigned long ulval;
-    int fld = bl->fld;
-    boolean use_rawval = (fld == BL_HP || fld == BL_ENE);
+    int fld;
+    boolean use_rawval;
 
     if (!bl || !maxbl) {
         impossible("percentage: bad istat pointer %s, %s",
@@ -1688,6 +1698,8 @@ percentage(struct istat_s *bl, struct istat_s *maxbl)
         return 0;
     }
 
+    fld = bl->fld;
+    use_rawval = (fld == BL_HP || fld == BL_ENE);
     ival = 0, lval = 0L, uval = 0U, ulval = 0UL;
     anytype = bl->anytype;
     if (maxbl->a.a_void) {
@@ -2437,7 +2449,7 @@ query_arrayvalue(
     anything any;
     menu_item *picks = (menu_item *) 0;
     int adj = (arrmin > 0) ? 1 : arrmax;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     tmpwin = create_nhwindow(NHW_MENU);
     start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -2792,7 +2804,7 @@ query_conditions(void)
     winid tmpwin;
     anything any;
     menu_item *picks = (menu_item *) 0;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     tmpwin = create_nhwindow(NHW_MENU);
     start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -3268,7 +3280,7 @@ static char *
 status_hilite2str(struct hilite_s *hl)
 {
     static char buf[BUFSZ];
-    int clr = 0, attr = 0;
+    int clr = NO_COLOR, attr = ATR_NONE;
     char behavebuf[BUFSZ];
     char clrbuf[BUFSZ];
     char attrbuf[BUFSZ];
@@ -3353,7 +3365,7 @@ status_hilite_menu_choose_field(void)
     int i, res, fld = BL_FLUSH;
     anything any;
     menu_item *picks = (menu_item *) 0;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     tmpwin = create_nhwindow(NHW_MENU);
     start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -3391,7 +3403,7 @@ status_hilite_menu_choose_behavior(int fld)
     char buf[BUFSZ];
     int at;
     int onlybeh = BL_TH_NONE, nopts = 0;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     if (fld < 0 || fld >= MAXBLSTATS)
         return BL_TH_NONE;
@@ -3495,7 +3507,7 @@ status_hilite_menu_choose_updownboth(
     char buf[BUFSZ];
     anything any;
     menu_item *picks = (menu_item *) 0;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     tmpwin = create_nhwindow(NHW_MENU);
     start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -3547,8 +3559,8 @@ status_hilite_menu_choose_updownboth(
             Sprintf(buf, "Value goes up");
         any = cg.zeroany;
         any.a_int = 10 + GT_VALUE;
-        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-             clr, buf, MENU_ITEMFLAGS_NONE);
+        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
+                 buf, MENU_ITEMFLAGS_NONE);
     }
     Sprintf(buf, "Select field %s value:", initblstats[fld].fldname);
     end_menu(tmpwin, buf);
@@ -3757,7 +3769,7 @@ status_hilite_menu_add(int origfld)
         if (initblstats[fld].anytype != ANY_STR) {
             boolean ltok = (fld != BL_TIME), gtok = TRUE;
 
-            lt_gt_eq = status_hilite_menu_choose_updownboth(fld, (char *)0,
+            lt_gt_eq = status_hilite_menu_choose_updownboth(fld, (char *) 0,
                                                             ltok, gtok);
             if (lt_gt_eq == NO_LTEQGT)
                 goto choose_behavior;
@@ -3903,14 +3915,14 @@ status_hilite_menu_add(int origfld)
     }
 
  choose_color:
-    clr = query_color(colorqry);
+    clr = query_color(colorqry, NO_COLOR);
     if (clr == -1) {
         if (behavior != BL_TH_ALWAYS_HILITE)
             goto choose_value;
         else
             goto choose_behavior;
     }
-    atr = query_attr(attrqry);
+    atr = query_attr(attrqry, ATR_NONE);
     if (atr == -1)
         goto choose_color;
 
@@ -4032,7 +4044,7 @@ status_hilite_menu_fld(int fld)
     struct _status_hilite_line_str *hlstr;
     char buf[BUFSZ];
     boolean acted;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     if (!count) {
         if (status_hilite_menu_add(fld)) {
@@ -4058,23 +4070,18 @@ status_hilite_menu_fld(int fld)
             hlstr = hlstr->next;
         }
     } else {
-        any = cg.zeroany;
         Sprintf(buf, "No current hilites for %s", initblstats[fld].fldname);
-        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr, buf,
-                 MENU_ITEMFLAGS_NONE);
+        add_menu_str(tmpwin, buf);
     }
 
     /* separator line */
-    any = cg.zeroany;
-    add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr, "",
-             MENU_ITEMFLAGS_NONE);
+    add_menu_str(tmpwin, "");
 
     if (count) {
         any = cg.zeroany;
         any.a_int = -1;
-        add_menu(tmpwin, &nul_glyphinfo, &any, 'X', 0, ATR_NONE,
-                 clr, "Remove selected hilites",
-                 MENU_ITEMFLAGS_NONE);
+        add_menu(tmpwin, &nul_glyphinfo, &any, 'X', 0, ATR_NONE, clr,
+                 "Remove selected hilites", MENU_ITEMFLAGS_NONE);
     }
 
 #ifndef SCORE_ON_BOTL
@@ -4176,7 +4183,7 @@ status_hilite_menu(void)
     anything any;
     boolean redo;
     int countall;
-    int clr = 0;
+    int clr = NO_COLOR;
 
  shlmenu_redo:
     redo = FALSE;
@@ -4193,9 +4200,7 @@ status_hilite_menu(void)
                  clr, "View all hilites in config format",
                  MENU_ITEMFLAGS_NONE);
 
-        any = cg.zeroany;
-        add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                 clr, "", MENU_ITEMFLAGS_NONE);
+        add_menu_str(tmpwin, "");
     }
 
     for (i = 0; i < MAXBLSTATS; i++) {

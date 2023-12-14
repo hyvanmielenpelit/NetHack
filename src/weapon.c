@@ -509,7 +509,7 @@ select_rwep(struct monst *mtmp)
 
     char mlet = mtmp->data->mlet;
 
-    gp.propellor = (struct obj *) &cg.zeroobj;
+    gp.propellor = &hands_obj;
     Oselect(EGG);      /* cockatrice egg */
     if (mlet == S_KOP) /* pies are first choice for Kops */
         Oselect(CREAM_PIE);
@@ -568,7 +568,7 @@ select_rwep(struct monst *mtmp)
         }
 
         /* KMH -- This belongs here so darts will work */
-        gp.propellor = (struct obj *) &cg.zeroobj;
+        gp.propellor = &hands_obj;
 
         prop = objects[rwep[i]].oc_skill;
         if (prop < 0) {
@@ -593,7 +593,7 @@ select_rwep(struct monst *mtmp)
                 gp.propellor = 0;
         }
         /* propellor = obj, propellor to use
-         * propellor = &cg.zeroobj, doesn't need a propellor
+         * propellor = &hands_obj, doesn't need a propellor
          * propellor = 0, needed one and didn't have one
          */
         if (gp.propellor != 0) {
@@ -788,7 +788,7 @@ mon_wield_item(struct monst *mon)
                    mon_nam(mon));
         return 0;
     }
-    if (obj && obj != &cg.zeroobj) {
+    if (obj && obj != &hands_obj) {
         struct obj *mw_tmp = MON_WEP(mon);
 
         if (mw_tmp && mw_tmp->otyp == obj->otyp) {
@@ -1136,6 +1136,8 @@ skill_advance(int skill)
     You("are now %s skilled in %s.",
         P_SKILL(skill) >= P_MAX_SKILL(skill) ? "most" : "more",
         P_NAME(skill));
+
+    skill_based_spellbook_id();
 }
 
 static const struct skill_range {
@@ -1165,7 +1167,7 @@ enhance_weapon_skill(void)
     anything any;
     winid win;
     boolean speedy = FALSE;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     /* player knows about #enhance, don't show tip anymore */
     gc.context.tips[TIP_ENHANCE] = TRUE;
@@ -1195,25 +1197,21 @@ enhance_weapon_skill(void)
         /* start with a legend if any entries will be annotated
            with "*" or "#" below */
         if (eventually_advance > 0 || maxxed_cnt > 0) {
-            any = cg.zeroany;
             if (eventually_advance > 0) {
                 Sprintf(buf, "(Skill%s flagged by \"*\" may be enhanced %s.)",
                         plur(eventually_advance),
                         (u.ulevel < MAXULEV)
                             ? "when you're more experienced"
                             : "if skill slots become available");
-                add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                         ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
+                add_menu_str(win, buf);
             }
             if (maxxed_cnt > 0) {
                 Sprintf(buf,
                  "(Skill%s flagged by \"#\" cannot be enhanced any further.)",
                         plur(maxxed_cnt));
-                add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                         ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
+                add_menu_str(win, buf);
             }
-            add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                     ATR_NONE, clr, "", MENU_ITEMFLAGS_NONE);
+            add_menu_str(win, "");
         }
 
         /* List the skills, making ones that could be advanced
@@ -1226,9 +1224,7 @@ enhance_weapon_skill(void)
                 /* Print headings for skill types */
                 any = cg.zeroany;
                 if (i == skill_ranges[pass].first)
-                    add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                             iflags.menu_headings, clr,
-                             skill_ranges[pass].name, MENU_ITEMFLAGS_NONE);
+                    add_menu_heading(win, skill_ranges[pass].name);
 
                 if (P_RESTRICTED(i))
                     continue;
@@ -1695,6 +1691,8 @@ skill_init(const struct def_skill *class_skill)
     /* each role has a special spell; allow at least basic for its type
        (despite the function name, this works for spell skills too) */
     unrestrict_weapon_skill(spell_skilltype(gu.urole.spelspec));
+
+    skill_based_spellbook_id();
 }
 
 void

@@ -588,7 +588,7 @@ explode(
     if (uhurt) {
         /* give message for any monster-induced explosion
            or player-induced one other than scroll of fire */
-        if (Verbose(1, explode) && (type < 0 || olet != SCROLL_CLASS)) {
+        if (flags.verbose && (type < 0 || olet != SCROLL_CLASS)) {
             if (do_hallu) { /* (see explanation above) */
                 do {
                     Sprintf(hallu_buf, "%s explosion",
@@ -649,6 +649,11 @@ explode(
                     else if (str != gk.killer.name && str != hallu_buf)
                         Strcpy(gk.killer.name, str);
                     gk.killer.format = KILLED_BY_AN;
+                } else if (olet == TRAP_EXPLODE) {
+                    gk.killer.format = NO_KILLER_PREFIX;
+                    Snprintf(gk.killer.name, sizeof gk.killer.name,
+                             "caught %sself in a %s", uhim(),
+                             str);
                 } else if (type >= 0 && olet != SCROLL_CLASS) {
                     gk.killer.format = NO_KILLER_PREFIX;
                     Snprintf(gk.killer.name, sizeof gk.killer.name,

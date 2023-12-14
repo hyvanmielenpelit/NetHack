@@ -341,7 +341,7 @@ map_cleanup(void)
                 /* in case any boulders are on liquid, delete them */
                 while ((otmp = sobj_at(BOULDER, x, y)) != 0) {
                     obj_extract_self(otmp);
-                    obfree(otmp, (struct obj *)0);
+                    obfree(otmp, (struct obj *) 0);
                 }
 
                 /* traps on liquid? */
@@ -961,7 +961,7 @@ flip_level_rnd(int flp, boolean extras)
 static void
 sel_set_wall_property(coordxy x, coordxy y, genericptr_t arg)
 {
-    int prop = *(int *)arg;
+    int prop = *(int *) arg;
 
     if (IS_STWALL(levl[x][y].typ) || IS_TREE(levl[x][y].typ)
         /* 3.6.2: made iron bars eligible to be flagged nondiggable
@@ -984,7 +984,7 @@ set_wall_property(coordxy x1, coordxy y1, coordxy x2, coordxy y2, int prop)
     y2 = min(y2, ROWNO - 1);
     for (y = y1; y <= y2; y++)
         for (x = x1; x <= x2; x++) {
-            sel_set_wall_property(x, y, (genericptr_t)&prop);
+            sel_set_wall_property(x, y, (genericptr_t) &prop);
         }
 }
 
@@ -1125,7 +1125,7 @@ rnddoor(void)
 {
     static int state[] = { D_NODOOR, D_BROKEN, D_ISOPEN, D_CLOSED, D_LOCKED };
 
-    return state[rn2(SIZE(state))];
+    return ROLL_FROM(state);
 }
 
 /*
@@ -3306,7 +3306,7 @@ lspo_monster(lua_State *L)
         tmpmons.coord = SP_COORD_PACK(mx, my);
 
     if (tmpmons.id != NON_PM && tmpmons.class == -1)
-        tmpmons.class = def_monsyms[(int) mons[tmpmons.id].mlet].sym;
+        tmpmons.class = monsym(&mons[tmpmons.id]);
 
     create_monster(&tmpmons, gc.coder->croom);
 
@@ -3714,6 +3714,8 @@ lspo_level_flags(lua_State *L)
             gc.coder->premapped = 1;
         else if (!strcmpi(s, "solidify"))
             gc.coder->solidify = 1;
+        else if (!strcmpi(s, "sokoban"))
+            Sokoban = 1; /* gl.level.flags.sokoban_rules */
         else if (!strcmpi(s, "inaccessibles"))
             gc.coder->check_inaccessibles = 1;
         else if (!strcmpi(s, "noflipx"))
@@ -4673,7 +4675,7 @@ struct selectionvar *
 selection_not(struct selectionvar *s)
 {
     int x, y;
-    NhRect tmprect;
+    NhRect tmprect = cg.zeroNhRect;
 
     for (x = 0; x < s->wid; x++)
         for (y = 0; y < s->hei; y++)
@@ -4687,7 +4689,7 @@ selection_filter_mapchar(struct selectionvar *ov,  xint16 typ, int lit)
 {
     int x, y;
     struct selectionvar *ret;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     if (!ov)
         return NULL;
@@ -4725,7 +4727,7 @@ selection_filter_percent(
 {
     int x, y;
     struct selectionvar *ret;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     if (!ov)
         return NULL;
@@ -4751,7 +4753,7 @@ selection_rndcoord(
     int idx = 0;
     int c;
     int dx, dy;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     selection_getbounds(ov, &rect);
 
@@ -4792,7 +4794,7 @@ selection_do_grow(struct selectionvar *ov, int dir)
 {
     coordxy x, y;
     struct selectionvar *tmp;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     if (!ov)
         return;
@@ -5220,7 +5222,7 @@ selection_iterate(
     genericptr_t arg)
 {
     coordxy x, y;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     if (!ov)
         return;
@@ -5253,6 +5255,8 @@ sel_set_ter(coordxy x, coordxy y, genericptr_t arg)
         levl[x][y].horizontal = 1;
     } else if (splev_init_present && levl[x][y].typ == ICE) {
         levl[x][y].icedpool = icedpools ? ICED_POOL : ICED_MOAT;
+    } else if (levl[x][y].typ == CLOUD) {
+        del_engr_at(x, y); /* clouds cannot have engravings */
     }
 }
 
@@ -5641,7 +5645,7 @@ lspo_replace_terrain(lua_State *L)
     lua_Integer x1, y1, x2, y2;
     int chance;
     int tolit;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     create_des_coder();
 
@@ -5785,7 +5789,7 @@ generate_way_out_method(
 
     /* generate one of the escape items */
     if (selection_rndcoord(ov2, &x, &y, FALSE)) {
-        mksobj_at(escapeitems[rn2(SIZE(escapeitems))], x, y, TRUE, FALSE);
+        mksobj_at(ROLL_FROM(escapeitems), x, y, TRUE, FALSE);
         goto gotitdone;
     }
 
@@ -6108,7 +6112,7 @@ lspo_exclusion(lua_State *L)
 static void
 sel_set_lit(coordxy x, coordxy y, genericptr_t arg)
 {
-     int lit = *(int *)arg;
+     int lit = *(int *) arg;
 
      levl[x][y].lit = (levl[x][y].typ == LAVAPOOL) ? 1 : lit;
 }
@@ -6612,12 +6616,12 @@ lspo_finalize_level(lua_State *L UNUSED)
     if (L && gc.coder->solidify)
         solidify_map();
 
-    /* This must be done before sokoban_detect(),
+    /* This must be done before premap_detect(),
      * otherwise branch stairs won't be premapped. */
     fixup_special();
 
     if (L && gc.coder->premapped)
-        sokoban_detect();
+        premap_detect();
 
     level_finalize_topology();
 
@@ -7075,12 +7079,12 @@ load_special(const char *name)
     if (gc.coder->solidify)
         solidify_map();
 
-    /* This must be done before sokoban_detect(),
+    /* This must be done before premap_detect(),
      * otherwise branch stairs won't be premapped. */
     fixup_special();
 
     if (gc.coder->premapped)
-        sokoban_detect();
+        premap_detect();
 
     result = TRUE;
  give_up:

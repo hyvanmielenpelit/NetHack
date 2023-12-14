@@ -1,4 +1,4 @@
-/* NetHack 3.7	polyself.c	$NHDT-Date: 1681429658 2023/04/13 23:47:38 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.197 $ */
+/* NetHack 3.7	polyself.c	$NHDT-Date: 1702274031 2023/12/11 05:53:51 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.204 $ */
 /*      Copyright (C) 1987, 1988, 1989 by Ken Arromdee */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -105,7 +105,12 @@ set_uasmon(void)
     PROPSET(BLINDED, !haseyes(mdat));
 #undef PROPSET
 
-    float_vs_flight(); /* maybe toggle (BFlying & I_SPECIAL) */
+    /* whether the player is flying/floating depends on their steed,
+       which won't be known during the restore process: but BFlying
+       and BStealth should be set correctly already in that case, so
+       there's nothing to do */
+    if (!gp.program_state.restoring)
+        float_vs_flight(); /* maybe toggle (BFlying & I_SPECIAL) */
     polysense();
 
 #ifdef STATUS_HILITES
@@ -133,7 +138,22 @@ float_vs_flight(void)
         BLevitation |= I_SPECIAL;
     else
         BLevitation &= ~I_SPECIAL;
+
+    /* riding blocks stealth unless hero+steed fly, so a change in flying
+       might cause a change in stealth */
+    steed_vs_stealth();
+
     gc.context.botl = TRUE;
+}
+
+/* riding blocks stealth unless hero+steed fly */
+void
+steed_vs_stealth(void)
+{
+    if (u.usteed && !Flying && !Levitation)
+        BStealth |= FROMOUTSIDE;
+    else
+        BStealth &= ~FROMOUTSIDE;
 }
 
 /* for changing into form that's immune to strangulation */
@@ -974,7 +994,7 @@ polymon(int mntmp)
 
     /* the explanation of '#monster' used to be shown sooner, but there are
        possible fatalities above and it isn't useful unless hero survives */
-    if (Verbose(2, polymon)) {
+    if (flags.verbose) {
         static const char use_thec[] = "Use the command #%s to %s.";
         static const char monsterc[] = "monster";
         struct permonst *uptr = gy.youmonst.data;

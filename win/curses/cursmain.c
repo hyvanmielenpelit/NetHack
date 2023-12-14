@@ -149,6 +149,7 @@ int orig_cursor;            /* Preserve initial cursor state */
 WINDOW *base_term;          /* underlying terminal window */
 boolean counting;           /* Count window is active */
 WINDOW *mapwin, *statuswin, *messagewin;    /* Main windows */
+color_attr curses_menu_promptstyle = { NO_COLOR, ATR_NONE };
 
 /* Track if we're performing an update to the permanent window.
    Needed since we aren't using the normal menu functions to handle
@@ -210,7 +211,6 @@ curses_init_nhwindows(
 #else
     base_term = initscr();
 #endif
-#ifdef TEXTCOLOR
     if (has_colors()) {
         start_color();
         curses_init_nhcolors();
@@ -220,12 +220,6 @@ curses_init_nhwindows(
         iflags.wc2_guicolor = FALSE;
         set_wc2_option_mod_status(WC2_GUICOLOR, set_in_config);
     }
-#else
-    iflags.use_color = FALSE;
-    set_option_mod_status("color", set_in_config);
-    iflags.wc2_guicolor = FALSE;
-    set_wc2_option_mod_status(WC2_GUICOLOR, set_in_config);
-#endif
     noecho();
     raw();
     nonl(); /* don't force ^M into newline (^J); input accepts them both
@@ -682,25 +676,26 @@ void
 curses_add_menu(winid wid, const glyph_info *glyphinfo,
                 const ANY_P *identifier,
                 char accelerator, char group_accel, int attr,
-                int clr UNUSED, const char *str, unsigned itemflags)
+                int clr, const char *str, unsigned itemflags)
 {
     int curses_attr;
 
     attr &= ~(ATR_URGENT | ATR_NOHISTORY);
     curses_attr = curses_convert_attr(attr);
 
+    /* 'inv_update': 0 for normal menus, 1 and up for perminv window */
     if (inv_update) {
         /* persistent inventory window; nothing is selectable;
            omit glyphinfo because perm_invent is to the side of
-           the map so usually cramped for space */
-        curs_add_invt(inv_update, accelerator, curses_attr, str);
+           the map so usually cramped for horizontal space */
+        curs_add_invt(inv_update, accelerator, curses_attr, clr, str);
         inv_update++;
         return;
     }
 
     curses_add_nhmenu_item(wid, glyphinfo, identifier,
                            accelerator, group_accel,
-                           curses_attr, str, itemflags);
+                           curses_attr, clr, str, itemflags);
 }
 
 /*
@@ -798,10 +793,29 @@ curses_update_inventory(int arg)
 win_request_info *
 curses_ctrl_nhwindow(
     winid window UNUSED,
-    int request UNUSED,
-    win_request_info *wri UNUSED)
+    int request,
+    win_request_info *wri)
 {
-    return (win_request_info *) 0;
+    int attr;
+
+    if (!wri)
+        return (win_request_info *) 0;
+
+    switch (request) {
+    case set_mode:
+    case request_settings:
+        break;
+    case set_menu_promptstyle:
+	curses_menu_promptstyle.color = wri->fromcore.menu_promptstyle.color;
+        if (curses_menu_promptstyle.color == NO_COLOR)
+            curses_menu_promptstyle.color = NONE;
+	attr = wri->fromcore.menu_promptstyle.attr;
+	curses_menu_promptstyle.attr = curses_convert_attr(attr);;
+        break;
+    default:
+        break;
+    }
+    return wri;
 }
 
 /*
@@ -827,9 +841,11 @@ wait_synch()    -- Wait until all pending output is complete (*flush*() for
 void
 curses_wait_synch(void)
 {
-    if (curses_got_output())
-        (void) curses_more();
-    curses_mark_synch();
+    if (iflags.window_inited) {
+        if (curses_got_output())
+            (void) curses_more();
+        curses_mark_synch();
+    }
     /* [do we need 'if (counting) curses_count_window((char *)0);' here?] */
 }
 

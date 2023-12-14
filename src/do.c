@@ -1,4 +1,4 @@
-/* NetHack 3.7	do.c	$NHDT-Date: 1689629244 2023/07/17 21:27:24 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.358 $ */
+/* NetHack 3.7	do.c	$NHDT-Date: 1702023250 2023/12/08 08:14:10 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.368 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Derek S. Ray, 2015. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -7,7 +7,6 @@
 
 #include "hack.h"
 
-static void polymorph_sink(void);
 static boolean teleport_sink(void);
 static void dosinkring(struct obj *);
 static int drop(struct obj *);
@@ -100,7 +99,7 @@ boulder_hits_pool(
                     Strcpy(whobuf, y_monnam(u.usteed));
                 pline("%s %s %s into the %s.", upstart(whobuf),
                       vtense(whobuf, "push"), the(xname(otmp)), what);
-                if (Verbose(0, boulder_hits_pool1) && !Blind)
+                if (flags.verbose && !Blind)
                     pline("Now you can cross it!");
                 /* no splashing in this case */
             }
@@ -136,7 +135,7 @@ boulder_hits_pool(
                 dmg = d((Fire_resistance ? 1 : 3), 6);
                 losehp(Maybe_Half_Phys(dmg), /* lava damage */
                        "molten lava", KILLED_BY);
-            } else if (!fills_up && Verbose(0, boulder_hits_pool2)
+            } else if (!fills_up && flags.verbose
                        && (pushing ? !Blind : cansee(rx, ry)))
                 pline("It sinks without a trace!");
         }
@@ -304,6 +303,43 @@ flooreffects(struct obj *obj, coordxy x, coordxy y, const char *verb)
     } else if (gc.context.mon_moving && IS_ALTAR(levl[x][y].typ)
                && cansee(x,y)) {
         doaltarobj(obj);
+    } else if (obj->oclass == POTION_CLASS && gl.level.flags.temperature > 0
+               && (levl[x][y].typ == ROOM || levl[x][y].typ == CORR)) {
+        /* Potions are sometimes destroyed when landing on very hot
+           ground. The basic odds are 50% for nonblessed potions and
+           30% for blessed potions; if you have handled the object
+           (i.e. it is or was yours), these odds are adjusted by Luck
+           (each Luck point affects them by 2%). Artifact potions
+           would not be affected, if any existed.
+
+           Oil is not affected because its boiling point (and flash
+           point) are higher than that of water. For example, whale
+           oil, one of the substances traditionally used in oil lamps,
+           can survive over 100 degrees Centigrade more heat than
+           water can.*/
+        if (cansee(x,y)) {
+            /* unconditional "ground" is safe as this only runs for
+               room and corridor tiles */
+            pline("%s up as %s the hot ground.", Tobjnam(obj, "heat"),
+                  is_plural(obj) ? "they hit" : "it hits");
+        }
+
+        int survival_chance = obj->blessed ? 70 : 50;
+        if (obj->invlet)
+            survival_chance += Luck * 2;
+        if (obj->otyp == POT_OIL)
+            survival_chance = 100;
+
+        if (!obj_resists(obj, survival_chance, 100)) {
+            if (cansee(x,y)) {
+                pline("%s from the heat!",
+                      is_plural(obj) ? "They shatter" : "It shatters");
+            } else {
+                You_hear("a shattering noise.");
+            }
+            breakobj(obj, x, y, FALSE, FALSE);
+            res = TRUE;
+        }
     }
 
     gb.bhitpos = save_bhitpos;
@@ -352,7 +388,7 @@ trycall(struct obj *obj)
 
 /* Transforms the sink at the player's position into
    a fountain, throne, altar or grave. */
-static void
+void
 polymorph_sink(void)
 {
     uchar sym = S_sink;
@@ -685,7 +721,7 @@ drop(struct obj *obj)
 
     if (u.uswallow) {
         /* barrier between you and the floor */
-        if (Verbose(0, drop1)) {
+        if (flags.verbose) {
             char *onam_p, *mnam_p, monbuf[BUFSZ];
 
             mnam_p = mon_nam(u.ustuck);
@@ -713,7 +749,7 @@ drop(struct obj *obj)
 
             if (levhack)
                 ELevitation = W_ART; /* other than W_ARTI */
-            if (Verbose(0, drop2))
+            if (flags.verbose)
                 You("drop %s.", doname(obj));
             freeinv(obj);
             hitfloor(obj, TRUE);
@@ -721,9 +757,10 @@ drop(struct obj *obj)
                 float_down(I_SPECIAL | TIMEOUT, W_ARTI | W_ART);
             return ECMD_TIME;
         }
-        if (!IS_ALTAR(levl[u.ux][u.uy].typ) && Verbose(0, drop3))
+        if (!IS_ALTAR(levl[u.ux][u.uy].typ) && flags.verbose)
             You("drop %s.", doname(obj));
     }
+    obj->how_lost = LOST_DROPPED;
     dropx(obj);
     return ECMD_TIME;
 }
@@ -778,6 +815,7 @@ dropz(struct obj *obj, boolean with_impact)
         place_object(obj, u.ux, u.uy);
         if (with_impact)
             container_impact_dmg(obj, u.ux, u.uy);
+        impact_disturbs_zombies(obj, with_impact);
         if (obj == uball)
             drop_ball(u.ux, u.uy);
         else if (gl.level.flags.has_shop)
@@ -1419,7 +1457,6 @@ goto_level(
             new = FALSE; /* made a new level? */
     struct monst *mtmp;
     char whynot[BUFSZ];
-    char *annotation;
     int dist = depth(newlevel) - depth(&u.uz);
     boolean do_fall_dmg = FALSE;
     schar prev_temperature = gl.level.flags.temperature;
@@ -1682,7 +1719,7 @@ goto_level(
             /* you climb up the {stairs|ladder};
                fly up the stairs; fly up along the ladder */
             great_effort = (Punished && !Levitation);
-            if (Verbose(0, go_to_level1) || great_effort)
+            if (flags.verbose || great_effort)
                 pline("%s %s up%s the %s.",
                       great_effort ? "With great effort, you" : "You",
                       u_locomotion("climb"),
@@ -1700,7 +1737,7 @@ goto_level(
             if (!u.dz) {
                 ; /* stayed on same level? (no transit effects) */
             } else if (Flying) {
-                if (Verbose(0, go_to_level2))
+                if (flags.verbose)
                     You("fly down %s.",
                         ga.at_ladder ? "along the ladder" : "the stairs");
             } else if (near_capacity() > UNENCUMBERED
@@ -1721,7 +1758,7 @@ goto_level(
                            KILLED_BY);
                 selftouch("Falling, you");
             } else { /* ordinary descent */
-                if (Verbose(0, go_to_level3))
+                if (flags.verbose)
                     You("%s.", ga.at_ladder ? "climb down the ladder"
                                          : "descend the stairs");
             }
@@ -1752,8 +1789,6 @@ goto_level(
        if so, move one or the other to another location */
     if ((mtmp = m_at(u.ux, u.uy)) != 0)
         u_collide_m(mtmp);
-
-    initrack();
 
     /* initial movement of bubbles just before vision_recalc */
     if (Is_waterlevel(&u.uz) || Is_airlevel(&u.uz))
@@ -1881,9 +1916,7 @@ goto_level(
     save_currentstate();
 #endif
 
-    if ((annotation = get_annotation(&u.uz)) != 0)
-        You("remember this level as %s.", annotation);
-
+    print_level_annotation();
     /* give room entrance message, if any */
     check_special_room(FALSE);
     /* deliver objects traveling with player */

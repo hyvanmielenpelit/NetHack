@@ -1,4 +1,4 @@
-/* NetHack 3.7	dungeon.c	$NHDT-Date: 1689629244 2023/07/17 21:27:24 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.188 $ */
+/* NetHack 3.7	dungeon.c	$NHDT-Date: 1700012885 2023/11/15 01:48:05 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.197 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -38,8 +38,7 @@ static void Fread(genericptr_t, int, int, dlb *);
 static xint16 dname_to_dnum(const char *);
 static int find_branch(const char *, struct proto_dungeon *);
 static xint16 parent_dnum(const char *, struct proto_dungeon *);
-static int level_range(xint16, int, int, int, struct proto_dungeon *,
-                       int *);
+static int level_range(xint16, int, int, int, struct proto_dungeon *, int *);
 static xint16 parent_dlevel(const char *, struct proto_dungeon *);
 static int correct_branch_type(struct tmpbranch *);
 static branch *add_branch(int, int, struct proto_dungeon *);
@@ -53,11 +52,11 @@ static int get_dgn_align(lua_State *);
 static void init_dungeon_levels(lua_State *, struct proto_dungeon *, int);
 static boolean unplaced_floater(struct dungeon *);
 static boolean unreachable_level(d_level *, boolean);
-static void tport_menu(winid, char *, struct lchoice *, d_level *,
-                       boolean);
+static void tport_menu(winid, char *, struct lchoice *, d_level *, boolean);
 static const char *br_string(int);
 static char chr_u_on_lvl(d_level *);
 static void print_branch(winid, int, int, int, boolean, struct lchoice *);
+static char *get_annotation(d_level *);
 static void query_annotation(d_level *);
 static mapseen *load_mapseen(NHFILE *);
 static void save_mapseen(NHFILE *, mapseen *);
@@ -515,7 +514,7 @@ add_branch(
 
     branch_num = find_branch(gd.dungeons[dgn].dname, pd);
     new_branch = (branch *) alloc(sizeof(branch));
-    (void) memset((genericptr_t)new_branch, 0, sizeof(branch));
+    (void) memset((genericptr_t) new_branch, 0, sizeof(branch));
     new_branch->next = (branch *) 0;
     new_branch->id = branch_id++;
     new_branch->type = correct_branch_type(&pd->tmpbranch[branch_num]);
@@ -568,7 +567,7 @@ init_level(int dgn, int proto_index, struct proto_dungeon *pd)
 
     pd->final_lev[proto_index] = new_level =
         (s_level *) alloc(sizeof(s_level));
-    (void) memset((genericptr_t)new_level, 0, sizeof(s_level));
+    (void) memset((genericptr_t) new_level, 0, sizeof(s_level));
     /* load new level with data */
     Strcpy(new_level->proto, tlevel->name);
     new_level->boneid = tlevel->boneschar;
@@ -1501,7 +1500,7 @@ u_on_newpos(coordxy x, coordxy y)
        stale values from previous level */
     if (!on_level(&u.uz, &u.uz0))
         u.ux0 = u.ux, u.uy0 = u.uy;
-    else if (!Blind && !Hallucination)
+    else if (!Blind && !Hallucination && !u.uswallow)
         /* still on same level; might have come close enough to
            generic object(s) to redisplay them as specific objects */
         see_nearby_objects();
@@ -2281,7 +2280,7 @@ tport_menu(
 {
     char tmpbuf[BUFSZ];
     anything any;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     lchoices->lev[lchoices->idx] = lvl_p->dlevel;
     lchoices->dgn[lchoices->idx] = lvl_p->dnum;
@@ -2427,10 +2426,8 @@ print_dungeon(boolean bymenu, schar *rlev, xint16 *rdgn)
     s_level *slev;
     dungeon *dptr;
     branch *br;
-    anything any;
     struct lchoice lchoices;
     winid win = create_nhwindow(NHW_MENU);
-    int clr = 0;
 
     if (bymenu) {
         start_menu(win, MENU_BEHAVE_STANDARD);
@@ -2461,9 +2458,7 @@ print_dungeon(boolean bymenu, schar *rlev, xint16 *rdgn)
                         dptr->depth_start + dptr->entry_lev - 1);
         }
         if (bymenu) {
-            any = cg.zeroany;
-            add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                     iflags.menu_headings, clr, buf, MENU_ITEMFLAGS_NONE);
+            add_menu_heading(win, buf);
         } else
             putstr(win, 0, buf);
 
@@ -2609,7 +2604,7 @@ recbranch_mapseen(d_level *source, d_level *dest)
     }
 }
 
-char *
+static char *
 get_annotation(d_level *lev)
 {
     mapseen *mptr;
@@ -2617,6 +2612,16 @@ get_annotation(d_level *lev)
     if ((mptr = find_mapseen(lev)))
         return mptr->custom;
     return NULL;
+}
+
+/* print the annotation for the current level, if it exists */
+void
+print_level_annotation(void)
+{
+    const char *annotation;
+
+    if ((annotation = get_annotation(&u.uz)) != 0)
+        You("remember this level as %s.", annotation);
 }
 
 /* ask user to annotate level lev.
@@ -2645,7 +2650,29 @@ query_annotation(d_level *lev)
         getlin(tmpbuf, nbuf);
     } else
 #endif
-        getlin("What do you want to call this dungeon level?", nbuf);
+    {
+        char qbuf[QBUFSZ], lbuf[QBUFSZ]; /* level description */
+
+        if (!lev || on_level(&u.uz, lev)) {
+            Strcpy(lbuf, "this dungeon level");
+        } else {
+            int dflgs = (lev->dnum == u.uz.dnum) ? 0 : 2;
+            d_level save_uz = u.uz;
+
+            u.uz = *lev;
+            (void) describe_level(lbuf, dflgs);
+            u.uz = save_uz;
+
+            (void) strsubst(lbuf, "Dlvl:", "level ");
+            /* even though we've told describe_level() not to append
+               a trailing space (by not including '1' in dflgs), the
+               level number is formatted with %-2d so single digit
+               values will end up with one anyway; remove it */
+            (void) trimspaces(lbuf);
+        }
+        Snprintf(qbuf, sizeof qbuf, "What do you want to call %s?", lbuf);
+        getlin(qbuf, nbuf);
+    }
 
     /* empty input or ESC means don't add or change annotation;
        space-only means discard current annotation without adding new one */
@@ -2671,7 +2698,7 @@ query_annotation(d_level *lev)
 int
 donamelevel(void)
 {
-    query_annotation((d_level *)0);
+    query_annotation((d_level *) 0);
     return ECMD_OK;
 }
 
@@ -2764,7 +2791,7 @@ find_mapseen_by_str(const char *s)
 void
 rm_mapseen(int ledger_num)
 {
-    mapseen *mptr, *mprev = (mapseen *)0;
+    mapseen *mptr, *mprev = (mapseen *) 0;
     struct cemetery *bp, *bpnext;
 
     for (mptr = gm.mapseenchn; mptr; mprev = mptr, mptr = mptr->next)
@@ -3395,9 +3422,9 @@ show_overview(
     if (In_endgame(&u.uz))
         traverse_mapseenchn(1, win, why, reason, &lastdun);
     /* if game is over or we're not in the endgame yet, show the dungeon */
-    if (why != 0 || !In_endgame(&u.uz))
+    if (why > 0 || !In_endgame(&u.uz))
         traverse_mapseenchn(0, win, why, reason, &lastdun);
-    end_menu(win, (char *)0);
+    end_menu(win, (char *) 0);
     n = select_menu(win, (why != -1) ? PICK_NONE : PICK_ONE, &selected);
     if (n > 0) {
         int ledger;
@@ -3653,10 +3680,8 @@ print_mapseen(
             Sprintf(buf, "%s: levels %d to %d",
                     gd.dungeons[dnum].dname, depthstart,
                     depthstart + gd.dungeons[dnum].dunlev_ureached - 1);
-        any = cg.zeroany;
-        add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                 !final ? iflags.menu_headings : ATR_NONE, NO_COLOR,
-                 buf, MENU_ITEMFLAGS_NONE);
+
+        add_menu_heading(win, buf);
     }
 
     /* calculate level number */
@@ -3738,9 +3763,7 @@ print_mapseen(
         buf[i] = highc(buf[i]);
         /* capitalizing it makes it a sentence; terminate with '.' */
         Strcat(buf, ".");
-        any = cg.zeroany;
-        add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, NO_COLOR,
-                 buf, MENU_ITEMFLAGS_NONE);
+        add_menu_str(win, buf);
     }
 
     /* we assume that these are mutually exclusive */
@@ -3777,16 +3800,12 @@ print_mapseen(
         Sprintf(buf, "%sMoloch's Sanctum.", PREFIX);
     }
     if (*buf) {
-        any = cg.zeroany;
-        add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, NO_COLOR,
-                 buf, MENU_ITEMFLAGS_NONE);
+        add_menu_str(win, buf);
     }
     /* quest entrance is not mutually-exclusive with bigroom or rogue level */
     if (mptr->flags.quest_summons) {
         Sprintf(buf, "%sSummoned by %s.", PREFIX, ldrname());
-        any = cg.zeroany;
-        add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, NO_COLOR,
-                 buf, MENU_ITEMFLAGS_NONE);
+        add_menu_str(win, buf);
     }
 
     /* print out branches */
@@ -3801,9 +3820,7 @@ print_mapseen(
         if (mptr->br->end1_up && !In_endgame(&(mptr->br->end2)))
             Sprintf(eos(buf), ", level %d", depth(&(mptr->br->end2)));
         Strcat(buf, ".");
-        any = cg.zeroany;
-        add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, NO_COLOR,
-                 buf, MENU_ITEMFLAGS_NONE);
+        add_menu_str(win, buf);
     }
 
     /* maybe print out bones details */
@@ -3816,9 +3833,7 @@ print_mapseen(
                 ++kncnt;
         if (kncnt) {
             Sprintf(buf, "%s%s", PREFIX, "Final resting place for");
-            any = cg.zeroany;
-            add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, NO_COLOR,
-                     buf, MENU_ITEMFLAGS_NONE);
+            add_menu_str(win, buf);
             if (died_here) {
                 /* disclosure occurs before bones creation, so listing dead
                    hero here doesn't give away whether bones are produced */
@@ -3830,18 +3845,13 @@ print_mapseen(
                 (void) strsubst(tmpbuf, " her ", " your ");
                 Snprintf(buf, sizeof(buf), "%s%syou, %s%c", PREFIX, TAB,
                          tmpbuf, --kncnt ? ',' : '.');
-                any = cg.zeroany;
-                add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, NO_COLOR,
-                         buf, MENU_ITEMFLAGS_NONE);
+                add_menu_str(win, buf);
             }
             for (bp = mptr->final_resting_place; bp; bp = bp->next) {
                 if (bp->bonesknown || wizard || final > 0) {
                     Sprintf(buf, "%s%s%s, %s%c", PREFIX, TAB, bp->who,
                             bp->how, --kncnt ? ',' : '.');
-                    any = cg.zeroany;
-                    add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                             ATR_NONE, NO_COLOR,
-                             buf, MENU_ITEMFLAGS_NONE);
+                    add_menu_str(win, buf);
                 }
             }
         }

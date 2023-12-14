@@ -1,4 +1,4 @@
-/* NetHack 3.7	objnam.c	$NHDT-Date: 1686386790 2023/06/10 08:46:30 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.392 $ */
+/* NetHack 3.7	objnam.c	$NHDT-Date: 1702349266 2023/12/12 02:47:46 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.407 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2011. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -49,6 +49,7 @@ static boolean wishymatch(const char *, const char *, boolean);
 static short rnd_otyp_by_wpnskill(schar);
 static short rnd_otyp_by_namedesc(const char *, char, int);
 static struct obj *wizterrainwish(struct _readobjnam_data *);
+static void dbterrainmesg(const char *, coordxy, coordxy);
 static void readobjnam_init(char *, struct _readobjnam_data *);
 static int readobjnam_preparse(struct _readobjnam_data *);
 static void readobjnam_parse_charges(struct _readobjnam_data *);
@@ -1406,7 +1407,15 @@ doname_base(
                     tethered ? "tethered " : "", /* aklys */
                     /* avoid "tethered wielded in right hand" for twoweapon */
                     (twoweap_primary && !tethered) ? "wielded" : "weapon",
-                    twoweap_primary ? "right " : "", hand_s);
+                    bimanual(obj) ? "" : URIGHTY ? "right " : "left ",
+/*
+                    (twoweap_primary && URIGHTY)
+                        ? "right "
+                        : (twoweap_primary && ULEFTY)
+                            ? "left "
+                            :  "",
+*/
+                    hand_s);
             if (!Blind) {
                 if (gw.warn_obj_cnt && obj == uwep
                     && (EWarn_of_mon & W_WEP) != 0L)
@@ -1423,7 +1432,8 @@ doname_base(
     }
     if (obj->owornmask & W_SWAPWEP) {
         if (u.twoweap)
-            Sprintf(eos(bp), " (wielded in left %s)", body_part(HAND));
+            Sprintf(eos(bp), " (wielded in %s %s)",
+                    URIGHTY ? "left" : "right", body_part(HAND));
         else
             /* TODO: rephrase this when obj isn't a weapon or weptool */
             Sprintf(eos(bp), " (alternate weapon%s; not wielded)",
@@ -1865,8 +1875,13 @@ just_an(char *outbuf, const char *str)
     if (!str[1] || str[1] == ' ') {
         /* single letter; might be used for named fruit or a musical note */
         Strcpy(outbuf, strchr("aefhilmnosx", c0) ? "an " : "a ");
-    } else if (!strncmpi(str, "the ", 4) || !strcmpi(str, "molten lava")
-               || !strcmpi(str, "iron bars") || !strcmpi(str, "ice")) {
+    } else if (!strncmpi(str, "the ", 4)
+               /* these probably shouldn't be handled here because doing so
+                  impacts inventory when using them for named fruit */
+               || !strcmpi(str, "molten lava")
+               || !strcmpi(str, "iron bars")
+               || !strcmpi(str, "ice")
+               ) {
         ; /* no article */
     } else {
         /* normal case is "an <vowel>" or "a <consonant>" */
@@ -2262,7 +2277,7 @@ static const char *const special_subjs[] = {
 
 /* return form of the verb (input plural) for present tense 3rd person subj */
 char *
-vtense(const char* subj, const char* verb)
+vtense(const char *subj, const char *verb)
 {
     char *buf = nextobuf(), *bspot;
     int len, ltmp;
@@ -3239,8 +3254,9 @@ static struct obj *
 wizterrainwish(struct _readobjnam_data *d)
 {
     struct rm *lev;
-    boolean madeterrain = FALSE, badterrain = FALSE, didblock;
-    int trap, oldtyp;
+    boolean madeterrain = FALSE, badterrain = FALSE, didblock, is_dbridge;
+    int trap;
+    unsigned oldtyp, ltyp;
     coordxy x = u.ux, y = u.uy;
     char *bp = d->bp, *p = d->p;
 
@@ -3259,15 +3275,17 @@ wizterrainwish(struct _readobjnam_data *d)
             tname = trapname(trap, TRUE);
             pline("%s%s.", An(tname),
                   (trap != MAGIC_PORTAL) ? "" : " to nowhere");
-        } else
+        } else {
             pline("Creation of %s failed.", an(tname));
-        return (struct obj *) &cg.zeroobj;
+        }
+        return &hands_obj;
     }
 
     /* furniture and terrain (use at your own risk; can clobber stairs
        or place furniture on existing traps which shouldn't be allowed) */
     lev = &levl[x][y];
     oldtyp = lev->typ;
+    is_dbridge = (oldtyp == DRAWBRIDGE_DOWN || oldtyp == DRAWBRIDGE_UP);
     didblock = does_block(x, y, lev);
     p = eos(bp);
     if (!BSTRCMPI(bp, p - 8, "fountain")) {
@@ -3298,39 +3316,76 @@ wizterrainwish(struct _readobjnam_data *d)
         long save_prop;
         const char *new_water;
 
-        lev->typ = !BSTRCMPI(bp, p - 4, "pool") ? POOL
-                   : !BSTRCMPI(bp, p - 4, "moat") ? MOAT
-                     : WATER;
-        lev->flags = 0;
+        ltyp = !BSTRCMPI(bp, p - 4, "pool") ? POOL
+               : !BSTRCMPI(bp, p - 4, "moat") ? MOAT
+                 : WATER;
+        if (!is_dbridge) {
+            lev->typ = ltyp;
+            lev->flags = 0;
+        } else {
+            /* drawbridgemask overloads flags */
+            lev->drawbridgemask &= ~DB_UNDER;
+            lev->drawbridgemask |= DB_MOAT;
+        }
         del_engr_at(x, y);
-        save_prop = EHalluc_resistance;
-        EHalluc_resistance = 1;
-        new_water = waterbody_name(x, y);
-        EHalluc_resistance = save_prop;
-        pline("%s.", An(new_water));
-        /* Must manually make kelp! */
+        if (!is_dbridge) {
+            save_prop = EHalluc_resistance;
+            EHalluc_resistance = 1;
+            new_water = waterbody_name(x, y);
+            EHalluc_resistance = save_prop;
+            pline("%s.", An(new_water));
+            /* Must manually make kelp! */
+        } else {
+            dbterrainmesg("Moat", x, y);
+        }
         water_damage_chain(gl.level.objects[x][y], TRUE);
         madeterrain = TRUE;
 
     /* also matches "molten lava" */
     } else if (!BSTRCMPI(bp, p - 4, "lava")
                || !BSTRCMPI(bp, p - 12, "wall of lava")) {
-        lev->typ = !BSTRCMPI(bp, p - 12, "wall of lava") ? LAVAWALL : LAVAPOOL;
-        lev->flags = 0;
+        ltyp = !BSTRCMPI(bp, p - 12, "wall of lava") ? LAVAWALL : LAVAPOOL;
+        if (!is_dbridge) {
+            lev->typ = ltyp;
+            lev->flags = 0;
+        } else {
+            /* drawbridgemask overloads flags */
+            lev->drawbridgemask &= ~DB_UNDER;
+            lev->drawbridgemask |= DB_LAVA;
+        }
         del_engr_at(x, y);
-        pline("A pool of molten lava.");
-        if (!(Levitation || Flying) || lev->typ == LAVAWALL)
-            pooleffects(FALSE);
+        if (!is_dbridge) {
+            pline("A %s of molten lava.",
+                  (lev->typ == LAVAPOOL) ? "pool" : "wall");
+            if (!(Levitation || Flying) || lev->typ == LAVAWALL)
+                pooleffects(FALSE);
+        } else {
+            dbterrainmesg("Lava", x, y);
+        }
+        fire_damage_chain(gl.level.objects[x][y], TRUE, TRUE, x, y);
         madeterrain = TRUE;
     } else if (!BSTRCMPI(bp, p - 3, "ice")) {
-        lev->typ = ICE;
-        lev->flags = 0;
+        if (!is_dbridge) {
+            lev->typ = ICE;
+            /* icedpool overloads flags; specifies what ice will melt into */
+            lev->icedpool = (oldtyp == ROOM) ? ICED_POOL : ICED_MOAT;
+        } else {
+            /* drawbridgemask overloads flags */
+            lev->drawbridgemask &= ~DB_UNDER;
+            lev->drawbridgemask |= DB_ICE;
+        }
         del_engr_at(x, y);
 
         if (!strncmpi(bp, "melting ", 8))
             start_melt_ice_timeout(x, y, 0L);
 
-        pline("Ice.");
+        if (!is_dbridge) {
+            char icebuf[40];
+
+            pline("%s.", upstart(ice_descr(x, y, icebuf)));
+        } else {
+            dbterrainmesg("Ice", x, y);
+        }
         madeterrain = TRUE;
     } else if (!BSTRCMPI(bp, p - 5, "altar")) {
         aligntyp al;
@@ -3379,6 +3434,7 @@ wizterrainwish(struct _readobjnam_data *d)
         lev->typ = CLOUD;
         lev->flags = 0;
         pline("A cloud.");
+        del_engr_at(x, y);
         madeterrain = TRUE;
     } else if (!BSTRCMPI(bp, p - 4, "door")
                || (d->doorless && !BSTRCMPI(bp, p - 7, "doorway"))) {
@@ -3485,6 +3541,30 @@ wizterrainwish(struct _readobjnam_data *d)
             pline("Secret corridor requires corridor location.");
             badterrain = TRUE;
         }
+    } else if (!BSTRCMPI(bp, p - 4, "room")
+               || !BSTRCMPI(bp, p - 5, "floor")
+               || !BSTRCMPI(bp, p - 6, "ground")) {
+        if (oldtyp == ROOM
+            || (IS_FURNITURE(oldtyp) && CAN_OVERWRITE_TERRAIN(oldtyp))
+            || oldtyp == ICE || is_pool_or_lava(x, y)) {
+            struct trap *t;
+
+            lev->typ = ROOM;
+            pline("Room floor.");
+            if (IS_FURNITURE(oldtyp))
+                count_level_features();
+            if ((t = t_at(x, y)) != 0 && t->ttyp != MAGIC_PORTAL)
+                deltrap(t);
+            madeterrain = TRUE;
+        } else if (is_dbridge) {
+            lev->drawbridgemask &= ~DB_UNDER;
+            lev->drawbridgemask |= DB_FLOOR;
+            dbterrainmesg("Floor", x, y);
+            madeterrain = TRUE;
+        } else {
+            pline("Room|floor|ground not allowed here.");
+            badterrain = TRUE;
+        }
     }
 
     if (madeterrain) {
@@ -3495,7 +3575,7 @@ wizterrainwish(struct _readobjnam_data *d)
         if (u.uinwater && !is_pool(u.ux, u.uy)) {
             set_uinwater(0); /* u.uinwater = 0; leave the water */
             docrt();
-            /* [block/unblock_point was handled by docrt -> vision_recalc] */
+            /* [block/unblock_point handled by docrt -> vision_recalc] */
         } else {
             if (u.utrap && u.utraptype == TT_LAVA && !is_lava(u.ux, u.uy))
                 reset_utrap(FALSE);
@@ -3512,6 +3592,8 @@ wizterrainwish(struct _readobjnam_data *d)
         /* fixups for replaced terrain that aren't handled above */
         if (IS_FOUNTAIN(oldtyp) || IS_SINK(oldtyp))
             count_level_features(); /* update level.flags.nfountains,nsinks */
+        if (!is_ice(x, y))
+            spot_stop_timers(x, y, MELT_ICE_AWAY);
         /* horizontal is overlaid by fountain->blessedftn, grave->disturbed */
         if (IS_FOUNTAIN(oldtyp) || IS_GRAVE(oldtyp)
             || IS_WALL(oldtyp) || oldtyp == IRONBARS
@@ -3532,12 +3614,20 @@ wizterrainwish(struct _readobjnam_data *d)
            while in xorn form and replacing solid stone with furniture) */
         switch_terrain();
     }
-    if (madeterrain || badterrain) {
-        /* cast 'const' away; caller won't modify this */
-        return (struct obj *) &cg.zeroobj;
-    }
+    if (madeterrain || badterrain)
+        return &hands_obj;
 
     return (struct obj *) 0;
+}
+
+/* message common to several wizterrainwish() results */
+static void
+dbterrainmesg(
+    const char *newtype,
+    coordxy x, coordxy y)
+{
+    pline("%s %s the drawbridge.", newtype,
+          (levl[x][y].typ == DRAWBRIDGE_UP) ? "in front of" : "under");
 }
 
 #define TIN_UNDEFINED 0
@@ -4489,7 +4579,7 @@ readobjnam_postparse3(struct _readobjnam_data *d)
  * Return something wished for.  Specifying a null pointer for
  * the user request string results in a random object.  Otherwise,
  * if asking explicitly for "nothing" (or "nil") return no_wish;
- * if not an object return &cg.zeroobj; if an error (no matching object),
+ * if not an object return &hands_obj; if an error (no matching object),
  * return null.
  */
 struct obj *
@@ -4954,7 +5044,7 @@ readobjnam(char *bp, struct obj *no_wish)
          || (d.otmp->oartifact && rn2(nartifact_exist()) > 1)) && !wizard) {
         artifact_exists(d.otmp, safe_oname(d.otmp), FALSE, ONAME_NO_FLAGS);
         obfree(d.otmp, (struct obj *) 0);
-        d.otmp = (struct obj *) &cg.zeroobj;
+        d.otmp = &hands_obj;
         pline("For a moment, you feel %s in your %s, but it disappears!",
               something, makeplural(body_part(HAND)));
         return d.otmp;

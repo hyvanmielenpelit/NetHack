@@ -627,6 +627,7 @@ really_kick_object(coordxy x, coordxy y)
         }
         if (!flooreffects(gk.kickedobj, u.ux, u.uy, "fall")) {
             place_object(gk.kickedobj, u.ux, u.uy);
+            impact_disturbs_zombies(gk.kickedobj, TRUE);
             stackobj(gk.kickedobj);
             newsym(u.ux, u.uy);
         }
@@ -688,7 +689,7 @@ really_kick_object(coordxy x, coordxy y)
 
                 if (!Deaf)
                     pline1("Thwwpingg!");
-                You("%s!", flyingcoinmsg[rn2(SIZE(flyingcoinmsg))]);
+                You("%s!", ROLL_FROM(flyingcoinmsg));
                 (void) scatter(x, y, rnd(3), VIS_EFFECTS | MAY_HIT,
                                gk.kickedobj);
                 newsym(x, y);
@@ -770,6 +771,7 @@ really_kick_object(coordxy x, coordxy y)
             donate_gold(gtg, shkp, FALSE);
     }
     place_object(gk.kickedobj, gb.bhitpos.x, gb.bhitpos.y);
+    impact_disturbs_zombies(gk.kickedobj, TRUE);
     stackobj(gk.kickedobj);
     newsym(gk.kickedobj->ox, gk.kickedobj->oy);
     return 1;
@@ -912,7 +914,7 @@ kick_door(coordxy x, coordxy y, int avrg_attrib)
         boolean shopdoor = *in_rooms(x, y, SHOPBASE) ? TRUE : FALSE;
         /* break the door */
         if (gm.maploc->doormask & D_TRAPPED) {
-            if (Verbose(0, dokick))
+            if (flags.verbose)
                 You("kick the door.");
             exercise(A_STR, FALSE);
             gm.maploc->doormask = D_NODOOR;
@@ -958,7 +960,6 @@ dokick(void)
     int glyph, oldglyph = -1;
     register struct monst *mtmp;
     boolean no_kick = FALSE;
-    char buf[BUFSZ];
 
     if (nolimbs(gy.youmonst.data) || slithy(gy.youmonst.data)) {
         You("have no legs to kick with.");
@@ -1419,25 +1420,7 @@ dokick(void)
                 exercise(A_DEX, TRUE);
                 return ECMD_TIME;
             } else if (!rn2(3)) {
-                if (Blind && Deaf)
-                    Sprintf(buf, " %s", body_part(FACE));
-                else
-                    buf[0] = '\0';
-                pline("%s%s%s.", !Deaf ? "Flupp! " : "",
-                      !Blind
-                          ? "Muddy waste pops up from the drain"
-                          : !Deaf
-                              ? "You hear a sloshing sound"  /* Deaf-aware */
-                              : "Something splashes you in the", buf);
-                if (!(gm.maploc->looted & S_LRING)) { /* once per sink */
-                    if (!Blind)
-                        You_see("a ring shining in its midst.");
-                    (void) mkobj_at(RING_CLASS, x, y, TRUE);
-                    newsym(x, y);
-                    exercise(A_DEX, TRUE);
-                    exercise(A_WIS, TRUE); /* a discovery! */
-                    gm.maploc->looted |= S_LRING;
-                }
+                sink_backs_up(x, y);
                 return ECMD_TIME;
             }
             kick_ouch(x, y, "");

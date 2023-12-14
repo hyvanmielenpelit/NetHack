@@ -1,4 +1,4 @@
-/* NetHack 3.7	artifact.c	$NHDT-Date: 1654717838 2022/06/08 19:50:38 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.190 $ */
+/* NetHack 3.7	artifact.c	$NHDT-Date: 1702064500 2023/12/08 19:41:40 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.214 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2013. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -137,7 +137,7 @@ artiname(int artinum)
    into an artifact of matching type, or returned as-is if that's not
    possible.
    For the 2nd case, caller should use ``obj = mk_artifact(obj, A_NONE);''
-   for the 1st, ``obj = mk_artifact((struct obj *)0, some_alignment);''.
+   for the 1st, ``obj = mk_artifact((struct obj *) 0, some_alignment);''.
  */
 struct obj *
 mk_artifact(
@@ -1037,7 +1037,8 @@ undiscovered_artifact(xint16 m)
 
 /* display a list of discovered artifacts; return their count */
 int
-disp_artifact_discoveries(winid tmpwin) /* supplied by dodiscover() */
+disp_artifact_discoveries(
+    winid tmpwin) /* supplied by dodiscover(); type is NHW_TEXT */
 {
     int i, m, otyp;
     const char *algnstr;
@@ -1050,7 +1051,7 @@ disp_artifact_discoveries(winid tmpwin) /* supplied by dodiscover() */
             continue; /* for WIN_ERR, we just count */
 
         if (i == 0)
-            putstr(tmpwin, iflags.menu_headings, "Artifacts");
+            putstr(tmpwin, iflags.menu_headings.attr, "Artifacts");
         m = artidisco[i];
         otyp = artilist[m].otyp;
         algnstr = align_str(artilist[m].alignment);
@@ -1071,7 +1072,8 @@ dump_artifact_info(winid tmpwin)
     int m;
     char buf[BUFSZ], buf2[BUFSZ];
 
-    putstr(tmpwin, iflags.menu_headings, "Artifacts");
+    /* not a menu, but header uses same bold or whatever attribute as such */
+    putstr(tmpwin, iflags.menu_headings.attr, "Artifacts");
     for (m = 1; m <= NROFARTIFACTS; ++m) {
         Snprintf(buf2, sizeof buf2,
                 "[%s%s%s%s%s%s%s%s%s]", /* 9 bits overall */
@@ -1306,7 +1308,7 @@ Mb_hit(struct monst *magr, /* attacker */
             shieldeff(youdefend ? u.ux : mdef->mx,
                       youdefend ? u.uy : mdef->my);
         }
-        if ((do_stun || do_confuse) && Verbose(0,Mb_hit)) {
+        if ((do_stun || do_confuse) && flags.verbose) {
             char buf[BUFSZ];
 
             buf[0] = '\0';
@@ -1504,7 +1506,7 @@ artifact_hit(
                     return TRUE;
                 }
                 *dmgptr = 2 * mdef->mhp + FATAL_DAMAGE_MODIFIER;
-                pline(behead_msg[rn2(SIZE(behead_msg))], wepdesc,
+                pline(ROLL_FROM(behead_msg), wepdesc,
                       mon_nam(mdef));
                 if (Hallucination && !flags.female)
                     pline("Good job Henry, but that wasn't Anne.");
@@ -1524,7 +1526,7 @@ artifact_hit(
                     return TRUE;
                 }
                 *dmgptr = 2 * (Upolyd ? u.mh : u.uhp) + FATAL_DAMAGE_MODIFIER;
-                pline(behead_msg[rn2(SIZE(behead_msg))], wepdesc, "you");
+                pline(ROLL_FROM(behead_msg), wepdesc, "you");
                 otmp->dknown = TRUE;
                 /* Should amulets fall off? */
                 return TRUE;
@@ -1766,7 +1768,7 @@ arti_invoke(struct obj *obj)
             d_level newlev;
             winid tmpwin = create_nhwindow(NHW_MENU);
             anything any;
-            int clr = 0;
+            int clr = NO_COLOR;
 
             any = cg.zeroany; /* set all bits to zero */
             start_menu(tmpwin, MENU_BEHAVE_STANDARD);

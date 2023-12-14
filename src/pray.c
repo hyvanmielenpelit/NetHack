@@ -1,4 +1,4 @@
-/* NetHack 3.7	pray.c	$NHDT-Date: 1684138081 2023/05/15 08:08:01 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.194 $ */
+/* NetHack 3.7	pray.c	$NHDT-Date: 1702349066 2023/12/12 02:44:26 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.205 $ */
 /* Copyright (c) Benson I. Margulies, Mike Stephenson, Steve Linhart, 1989. */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -21,10 +21,10 @@ static void gods_angry(aligntyp);
 static void gods_upset(aligntyp);
 static void consume_offering(struct obj *);
 static void offer_too_soon(aligntyp);
-static void desecrate_high_altar(aligntyp);
 static void offer_real_amulet(struct obj *, aligntyp); /* NORETURN */
 static void offer_fake_amulet(struct obj *, boolean, aligntyp);
 static void offer_different_alignment_altar(struct obj *, aligntyp);
+static void sacrifice_your_race(struct obj *, boolean, aligntyp);
 static int bestow_artifact(void);
 static boolean pray_revive(void);
 static boolean water_prayer(boolean);
@@ -388,8 +388,8 @@ fix_worst_trouble(int trouble)
         /* teleport should always succeed, but if not, just untrap them */
         if (!safe_teleds(TELEDS_NO_FLAGS))
             reset_utrap(TRUE);
-        back_on_ground(DISSOLVED); /* DISSOLVED: pending cause of death
-                                    * if trouble didn't get cured */
+        rescued_from_terrain(DISSOLVED); /* DISSOLVED: pending cause of death
+                                          * if trouble didn't get cured */
         break;
     case TROUBLE_STARVING:
         /* temporarily lost strength recovery now handled by init_uhunger() */
@@ -1203,7 +1203,7 @@ pleased(aligntyp g_align)
                 if (u.uevent.uheard_tune < 1) {
                     godvoice(g_align, (char *) 0);
                     SetVoice((struct monst *) 0, 0, 80, voice_deity);
-                    verbalize("Hark, %s!", (gy.youmonst.data->mlet == S_HUMAN)
+                    verbalize("Hark, %s!", is_human(gy.youmonst.data)
                                                ? "mortal"
                                                : "creature");
                     SetVoice((struct monst *) 0, 0, 80, voice_deity);
@@ -1398,7 +1398,7 @@ godvoice(aligntyp g_align, const char *words)
         words = "";
 
     pline_The("voice of %s %s: %s%s%s", align_gname(g_align),
-              godvoices[rn2(SIZE(godvoices))], quot, words, quot);
+              ROLL_FROM(godvoices), quot, words, quot);
 }
 
 static void
@@ -1473,17 +1473,27 @@ offer_too_soon(aligntyp altaralign)
                         : "ashamed");
 }
 
-static void
-desecrate_high_altar(aligntyp altaralign)
+void
+desecrate_altar(boolean highaltar, aligntyp altaralign)
 {
+    char gvbuf[BUFSZ];
+
     /*
      * REAL BAD NEWS!!! High altars cannot be converted.  Even an attempt
-     * gets the god who owns it truly pissed off.
+     * gets the god who owns it truly pissed off.  The same effect for
+     * deliberately destroying a normal altar.
      */
+    /* if you did this to your own altar, your god will hold a grudge... */
+    if (altaralign == u.ualign.type) {
+        adjalign(-20);
+        u.ugangr += 5;
+    }
     You_feel("the air around you grow charged...");
-    pline("Suddenly, you realize that %s has noticed you...", a_gname());
-    godvoice(altaralign,
-                "So, mortal!  You dare desecrate my High Temple!");
+    pline("Suddenly, you realize that %s has noticed you...",
+          align_gname(altaralign));
+    Sprintf(gvbuf, "So, mortal!  You dare desecrate my %s!",
+            highaltar ? "High Temple" : "altar");
+    godvoice(altaralign, gvbuf);
     /* Throw everything we have at the player */
     god_zaps_you(altaralign);
 }
@@ -1580,7 +1590,7 @@ offer_fake_amulet(
         u.ugangr += 3;
         /* value = -3; */
         if (altaralign != u.ualign.type && highaltar) {
-            desecrate_high_altar(altaralign);
+            desecrate_altar(highaltar, altaralign);
         } else { /* value < 0 */
             gods_upset(altaralign);
         }
@@ -1655,6 +1665,89 @@ offer_different_alignment_altar(
     }
 }
 
+static void
+sacrifice_your_race(
+    struct obj *otmp,
+    boolean highaltar,
+    aligntyp altaralign)
+{
+    int pm;
+
+    if (is_demon(gy.youmonst.data)) {
+        You("find the idea very satisfying.");
+        exercise(A_WIS, TRUE);
+    } else if (u.ualign.type != A_CHAOTIC) {
+        pline("You'll regret this infamous offense!");
+        exercise(A_WIS, FALSE);
+    }
+
+    if (highaltar
+        && (altaralign != A_CHAOTIC || u.ualign.type != A_CHAOTIC)) {
+        desecrate_altar(highaltar, altaralign);
+        return;
+    } else if (altaralign != A_CHAOTIC && altaralign != A_NONE) {
+        /* curse the lawful/neutral altar */
+        pline_The("altar is stained with %s blood.", gu.urace.adj);
+        levl[u.ux][u.uy].altarmask = AM_CHAOTIC;
+        newsym(u.ux, u.uy); /* in case Invisible to self */
+        angry_priest();
+    } else {
+        struct monst *dmon;
+        const char *demonless_msg;
+
+        /* Human sacrifice on a chaotic or unaligned altar */
+        /* is equivalent to demon summoning */
+        if (altaralign == A_CHAOTIC && u.ualign.type != A_CHAOTIC) {
+            pline(
+            "The blood floods the altar, which vanishes in %s cloud!",
+                    an(hcolor(NH_BLACK)));
+            levl[u.ux][u.uy].typ = ROOM;
+            levl[u.ux][u.uy].altarmask = 0;
+            newsym(u.ux, u.uy);
+            angry_priest();
+            demonless_msg = "cloud dissipates";
+        } else {
+            /* either you're chaotic or altar is Moloch's or both */
+            pline_The("blood covers the altar!");
+            change_luck(altaralign == A_NONE ? -2 : 2);
+            demonless_msg = "blood coagulates";
+        }
+        if ((pm = dlord(altaralign)) != NON_PM
+            && (dmon = makemon(&mons[pm], u.ux, u.uy, MM_NOMSG))
+                    != 0) {
+            char dbuf[BUFSZ];
+
+            Strcpy(dbuf, a_monnam(dmon));
+            if (!strcmpi(dbuf, "it"))
+                Strcpy(dbuf, "something dreadful");
+            else
+                dmon->mstrategy &= ~STRAT_APPEARMSG;
+            You("have summoned %s!", dbuf);
+            if (sgn(u.ualign.type) == sgn(dmon->data->maligntyp))
+                dmon->mpeaceful = TRUE;
+            You("are terrified, and unable to move.");
+            nomul(-3);
+            gm.multi_reason = "being terrified of a demon";
+            gn.nomovemsg = 0;
+        } else
+            pline_The("%s.", demonless_msg);
+    }
+
+    if (u.ualign.type != A_CHAOTIC) {
+        adjalign(-5);
+        u.ugangr += 3;
+        (void) adjattrib(A_WIS, -1, TRUE);
+        if (!Inhell)
+            angrygods(u.ualign.type);
+        change_luck(-5);
+    } else
+        adjalign(5);
+    if (carried(otmp))
+        useup(otmp);
+    else
+        useupf(otmp, 1L);
+}
+
 static int
 bestow_artifact(void)
 {
@@ -1709,10 +1802,10 @@ bestow_artifact(void)
 int
 dosacrifice(void)
 {
-    register struct obj *otmp;
-    int value = 0, pm;
+    struct obj *otmp;
     boolean highaltar;
     aligntyp altaralign = a_align(u.ux, u.uy);
+    int value = 0;
 
     if (!on_altar() || u.uswallow) {
         You("are not standing on an altar.");
@@ -1723,6 +1816,22 @@ dosacrifice(void)
     otmp = floorfood("sacrifice", 1);
     if (!otmp)
         return ECMD_OK;
+
+    if (otmp->otyp == AMULET_OF_YENDOR) {
+        if (!highaltar) {
+            offer_too_soon(altaralign);
+            return ECMD_TIME;
+        } else {
+            offer_real_amulet(otmp, altaralign);
+            /*NOTREACHED*/
+        }
+    } /* real Amulet */
+
+    if (otmp->otyp == FAKE_AMULET_OF_YENDOR) {
+        offer_fake_amulet(otmp, highaltar, altaralign);
+        return ECMD_TIME;
+    } /* fake Amulet */
+
     /*
      * Was based on nutritional value and aging behavior (< 50 moves).
      * Sacrificing a food ration got you max luck instantly, making the
@@ -1735,7 +1844,7 @@ dosacrifice(void)
 #define MAXVALUE 24 /* Highest corpse value (besides Wiz) */
 
     if (otmp->otyp == CORPSE) {
-        register struct permonst *ptr = &mons[otmp->corpsenm];
+        struct permonst *ptr = &mons[otmp->corpsenm];
         struct monst *mtmp;
 
         /* KMH, conduct */
@@ -1761,79 +1870,7 @@ dosacrifice(void)
         /* same race or former pet results apply even if the corpse is
            too old (value==0) */
         if (your_race(ptr)) {
-            if (is_demon(gy.youmonst.data)) {
-                You("find the idea very satisfying.");
-                exercise(A_WIS, TRUE);
-            } else if (u.ualign.type != A_CHAOTIC) {
-                pline("You'll regret this infamous offense!");
-                exercise(A_WIS, FALSE);
-            }
-
-            if (highaltar
-                && (altaralign != A_CHAOTIC || u.ualign.type != A_CHAOTIC)) {
-                desecrate_high_altar(altaralign);
-                return ECMD_TIME;
-            } else if (altaralign != A_CHAOTIC && altaralign != A_NONE) {
-                /* curse the lawful/neutral altar */
-                pline_The("altar is stained with %s blood.", gu.urace.adj);
-                levl[u.ux][u.uy].altarmask = AM_CHAOTIC;
-                newsym(u.ux, u.uy); /* in case Invisible to self */
-                angry_priest();
-            } else {
-                struct monst *dmon;
-                const char *demonless_msg;
-
-                /* Human sacrifice on a chaotic or unaligned altar */
-                /* is equivalent to demon summoning */
-                if (altaralign == A_CHAOTIC && u.ualign.type != A_CHAOTIC) {
-                    pline(
-                    "The blood floods the altar, which vanishes in %s cloud!",
-                          an(hcolor(NH_BLACK)));
-                    levl[u.ux][u.uy].typ = ROOM;
-                    levl[u.ux][u.uy].altarmask = 0;
-                    newsym(u.ux, u.uy);
-                    angry_priest();
-                    demonless_msg = "cloud dissipates";
-                } else {
-                    /* either you're chaotic or altar is Moloch's or both */
-                    pline_The("blood covers the altar!");
-                    change_luck(altaralign == A_NONE ? -2 : 2);
-                    demonless_msg = "blood coagulates";
-                }
-                if ((pm = dlord(altaralign)) != NON_PM
-                    && (dmon = makemon(&mons[pm], u.ux, u.uy, MM_NOMSG))
-                           != 0) {
-                    char dbuf[BUFSZ];
-
-                    Strcpy(dbuf, a_monnam(dmon));
-                    if (!strcmpi(dbuf, "it"))
-                        Strcpy(dbuf, "something dreadful");
-                    else
-                        dmon->mstrategy &= ~STRAT_APPEARMSG;
-                    You("have summoned %s!", dbuf);
-                    if (sgn(u.ualign.type) == sgn(dmon->data->maligntyp))
-                        dmon->mpeaceful = TRUE;
-                    You("are terrified, and unable to move.");
-                    nomul(-3);
-                    gm.multi_reason = "being terrified of a demon";
-                    gn.nomovemsg = 0;
-                } else
-                    pline_The("%s.", demonless_msg);
-            }
-
-            if (u.ualign.type != A_CHAOTIC) {
-                adjalign(-5);
-                u.ugangr += 3;
-                (void) adjattrib(A_WIS, -1, TRUE);
-                if (!Inhell)
-                    angrygods(u.ualign.type);
-                change_luck(-5);
-            } else
-                adjalign(5);
-            if (carried(otmp))
-                useup(otmp);
-            else
-                useupf(otmp, 1L);
+            sacrifice_your_race(otmp, highaltar, altaralign);
             return ECMD_TIME;
         } else if (has_omonst(otmp)
                    && (mtmp = get_mtraits(otmp, FALSE)) != 0
@@ -1890,22 +1927,9 @@ dosacrifice(void)
                 value += 3;
             }
         }
-    } /* corpse */
-
-    if (otmp->otyp == AMULET_OF_YENDOR) {
-        if (!highaltar) {
-            offer_too_soon(altaralign);
-            return ECMD_TIME;
-        } else {
-            offer_real_amulet(otmp, altaralign);
-            /*NOTREACHED*/
-        }
-    } /* real Amulet */
-
-    if (otmp->otyp == FAKE_AMULET_OF_YENDOR) {
-        offer_fake_amulet(otmp, highaltar, altaralign);
-        return ECMD_TIME;
-    } /* fake Amulet */
+    } else { /* !corpse */
+        ; /* value==0 which is what we want for non-corpse */
+    } /* ?corpse */
 
     if (value == 0) {
         pline1(nothing_happens);
@@ -1913,7 +1937,7 @@ dosacrifice(void)
     }
 
     if (altaralign != u.ualign.type && highaltar) {
-        desecrate_high_altar(altaralign);
+        desecrate_altar(highaltar, altaralign);
     } else if (value < 0) { /* don't think the gods are gonna like this... */
         gods_upset(altaralign);
     } else if (u.ualign.type != altaralign) {

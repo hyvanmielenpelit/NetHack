@@ -1,4 +1,4 @@
-/* NetHack 3.7	flag.h	$NHDT-Date: 1684791761 2023/05/22 21:42:41 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.217 $ */
+/* NetHack 3.7	flag.h	$NHDT-Date: 1698264779 2023/10/25 20:12:59 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.224 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Michael Allison, 2006. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -45,8 +45,10 @@ struct flag {
     boolean mention_decor;   /* give feedback for unobscured furniture */
     boolean mention_walls;   /* give feedback when bumping walls */
     boolean nap;             /* `timed_delay' option for display effects */
+    boolean nopick_dropped;  /* items you dropped may be autopicked */
     boolean null;            /* OK to send nulls to the terminal */
     boolean pickup;          /* whether you pickup or move and look */
+    boolean pickup_stolen;   /* auto-pickup items stolen by a monster */
     boolean pickup_thrown;   /* auto-pickup items you threw */
     boolean pushweapon; /* When wielding, push old weapon into second slot */
     boolean quick_farsight;  /* True disables map browsing during random
@@ -251,7 +253,7 @@ struct instance_flags {
     int getpos_coords;    /* show coordinates when getting cursor position */
     int menuinvertmode;  /* 0 = invert toggles every item;
                             1 = invert skips 'all items' item */
-    int menu_headings;    /* ATR for menu headings */
+    color_attr menu_headings;    /* CLR_ and ATR_ for menu headings */
     uint32_t colorcount;    /* store how many colors terminal is capable of */
     boolean use_truecolor;  /* force use of truecolor */
 #ifdef ALTMETA
@@ -271,7 +273,7 @@ struct instance_flags {
     boolean menu_tab_sep;     /* Use tabs to separate option menu fields */
     boolean news;             /* print news */
     boolean num_pad;          /* use numbers for movement commands */
-    boolean perm_invent;      /* keep full inventories up until dismissed */
+    boolean perm_invent;      /* display persistent inventory window */
     boolean renameallowed;    /* can change hero name during role selection */
     boolean renameinprogress; /* we are changing hero name */
     boolean sounds;           /* master on/off switch for using soundlib */
@@ -290,8 +292,16 @@ struct instance_flags {
     boolean zerocomp;         /* write zero-compressed save files */
     boolean rlecomp;          /* alternative to zerocomp; run-length encoding
                                * compression of levels when writing savefile */
+    schar ice_rating;         /* ice_descr()'s classification of ice terrain */
     schar prev_decor;         /* 'mention_decor' just mentioned this */
-    uchar num_pad_mode;
+    uchar num_pad_mode;       /* for num_pad==True, controls how 5 behaves
+                               * and/or 789456123 vs phone-style 123456789;
+                               * for False, qwertY vs qwertZ */
+    uchar perminv_mode;       /* what to display in persistent invent window
+                               * 0: nothing, 1: all inventory except gold,
+                               * 2: full including gold, 8: in-use items only,
+                               * 5|6: 1|2 with invent letters shown in empty
+                               * slots (TTY only: 'sparse' modes) */
     uchar bouldersym;         /* symbol for boulder display */
     char prevmsg_window;      /* type of old message window to use */
     boolean extmenu;          /* extended commands use menu interface */
@@ -404,6 +414,8 @@ struct instance_flags {
                                     chosen_windowport[], but do not switch to
                                     it in the midst of options processing */
     genericptr_t returning_missile; /* 'struct obj *'; Mjollnir or aklys */
+    boolean wiz_error_flag;     /* flag for tracking failed wizmode auth */
+    boolean explore_error_flag; /* ditto for explore mode */
     boolean obsolete;  /* obsolete options can point at this, it isn't used */
 };
 

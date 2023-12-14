@@ -279,7 +279,7 @@ _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);*/
     }
 #endif
 
-#if defined(TOS) && defined(TEXTCOLOR)
+#if defined(TOS)
     if (iflags.BIOS && iflags.use_color)
         set_colors();
 #endif
@@ -718,6 +718,13 @@ authorize_wizard_mode(void)
     if (!strcmp(gp.plname, WIZARD_NAME))
         return TRUE;
     return FALSE;
+}
+
+/* similar to above, validate explore mode access */
+boolean
+authorize_explore_mode(void)
+{
+    return TRUE; /* no restrictions on explore mode */
 }
 
 #ifdef EXEPATH

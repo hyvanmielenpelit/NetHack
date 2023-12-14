@@ -40,7 +40,9 @@ is_home_elemental(struct permonst *ptr)
             return Is_earthlevel(&u.uz);
         case PM_WATER_ELEMENTAL:
             return Is_waterlevel(&u.uz);
-        }
+        default:
+	    break;
+	}
     return FALSE;
 }
 
@@ -1270,6 +1272,8 @@ makemon(
     mtmp->mcansee = mtmp->mcanmove = TRUE;
     mtmp->seen_resistance = M_SEEN_NOTHING;
     mtmp->mpeaceful = (mmflags & MM_ANGRY) ? FALSE : peace_minded(ptr);
+    if ((mmflags & MM_MINVIS) != 0) /* for ^G */
+        mon_set_minvis(mtmp); /* call after place_monster() */
 
     switch (ptr->mlet) {
     case S_MIMIC:
@@ -1636,7 +1640,7 @@ rndmonst_adj(int minadj, int maxadj)
 
         if (montooweak(mndx, minmlev) || montoostrong(mndx, maxmlev))
             continue;
-        if (upper && !isupper((uchar) def_monsyms[(int) ptr->mlet].sym))
+        if (upper && !isupper(monsym(ptr)))
             continue;
         if (elemlevel && wrong_elem_type(ptr))
             continue;
@@ -2313,7 +2317,7 @@ set_mimic_sym(register struct monst *mtmp)
             goto assign_sym;
         }
     } else {
-        s_sym = syms[rn2(SIZE(syms))];
+        s_sym = ROLL_FROM(syms);
  assign_sym:
         if (s_sym == MAXOCLASSES) {
             static const int furnsyms[] = {
@@ -2322,7 +2326,7 @@ set_mimic_sym(register struct monst *mtmp)
             };
 
             ap_type = M_AP_FURNITURE;
-            appear = furnsyms[rn2(SIZE(furnsyms))];
+            appear = ROLL_FROM(furnsyms);
         } else {
             ap_type = M_AP_OBJECT;
             if (s_sym == S_MIMIC_DEF) {
@@ -2422,7 +2426,7 @@ bagotricks(
                 update_inventory(); /* for perm_invent */
             }
         } else if (!tipping) {
-            pline1(!moncount ? nothing_happens : "Nothing seems to happen.");
+            pline1(!moncount ? nothing_happens : nothing_seems_to_happen);
         }
     }
     return moncount;

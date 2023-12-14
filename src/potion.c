@@ -1,4 +1,4 @@
-/* NetHack 3.7	potion.c	$NHDT-Date: 1685135014 2023/05/26 21:03:34 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.238 $ */
+/* NetHack 3.7	potion.c	$NHDT-Date: 1699582924 2023/11/10 02:22:04 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.251 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2013. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -38,6 +38,7 @@ static boolean H2Opotion_dip(struct obj *, struct obj *, boolean,
                              const char *);
 static short mixtype(struct obj *, struct obj *);
 static int dip_ok(struct obj *);
+static int dip_hands_ok(struct obj *);
 static void hold_potion(struct obj *, const char *, const char *,
                         const char *);
 static int potion_dip(struct obj *obj, struct obj *potion);
@@ -489,7 +490,7 @@ ghost_from_bottle(void)
     }
     pline("As you open the bottle, an enormous %s emerges!",
           Hallucination ? rndmonnam(NULL) : (const char *) "ghost");
-    if (Verbose(3, ghost_from_bottle))
+    if (flags.verbose)
         You("are frightened to death, and unable to move.");
     nomul(-3);
     gm.multi_reason = "being frightened to death";
@@ -1467,9 +1468,9 @@ const char *
 bottlename(void)
 {
     if (Hallucination)
-        return hbottlenames[rn2(SIZE(hbottlenames))];
+        return ROLL_FROM(hbottlenames);
     else
-        return bottlenames[rn2(SIZE(bottlenames))];
+        return ROLL_FROM(bottlenames);
 }
 
 /* handle item dipped into water potion or steed saddle splashed by same */
@@ -1745,14 +1746,11 @@ potionhit(struct monst *mon, struct obj *obj, int how)
                 break;
             }
  do_illness:
-            if ((mon->mhpmax > 3) && !resist(mon, POTION_CLASS, 0, NOTELL))
-                mon->mhpmax /= 2;
-            if ((mon->mhp > 2) && !resist(mon, POTION_CLASS, 0, NOTELL))
+            if (mon->mhp > 2) {
                 mon->mhp /= 2;
-            if (mon->mhp > mon->mhpmax)
-                mon->mhp = mon->mhpmax;
-            if (canseemon(mon))
-                pline("%s looks rather ill.", Monnam(mon));
+                if (canseemon(mon))
+                    pline("%s looks rather ill.", Monnam(mon));
+            }
             break;
         case POT_CONFUSION:
         case POT_BOOZE:
@@ -2180,8 +2178,11 @@ mixtype(struct obj *o1, struct obj *o2)
 static int
 dip_ok(struct obj *obj)
 {
-    /* dipping hands and gold isn't currently implemented */
-    if (!obj || obj->oclass == COIN_CLASS)
+    if (!obj)
+        return GETOBJ_DOWNPLAY;
+
+    /* dipping gold isn't currently implemented */
+    if (obj->oclass == COIN_CLASS)
         return GETOBJ_EXCLUDE;
 
     if (inaccessible_equipment(obj, (const char *) 0, FALSE))
@@ -2190,12 +2191,24 @@ dip_ok(struct obj *obj)
     return GETOBJ_SUGGEST;
 }
 
+/* getobj callback for object to be dipped when hero has slippery hands */
+static int
+dip_hands_ok(struct obj *obj)
+{
+    if (!obj && (Glib && can_reach_floor(FALSE)))
+        return GETOBJ_SUGGEST;
+
+    return dip_ok(obj);
+}
+
 /* call hold_another_object() to deal with a transformed potion; its weight
    won't have changed but it might require an extra slot that isn't available
    or it might merge into some other carried stack */
 static void
-hold_potion(struct obj *potobj, const char *drop_fmt, const char *drop_arg,
-            const char *hold_msg)
+hold_potion(
+    struct obj *potobj,
+    const char *drop_fmt, const char *drop_arg,
+    const char *hold_msg)
 {
     int cap = near_capacity(),
         save_pickup_burden = flags.pickup_burden;
@@ -2212,26 +2225,33 @@ hold_potion(struct obj *potobj, const char *drop_fmt, const char *drop_arg,
     return;
 }
 
-/* #dip command - get item to dip, then get potion to dip it into */
+/* #dip command - get item to dip, then get potion to dip it into;
+   precede with 'm' to bypass fountain, pool, or sink at hero's spot */
 int
 dodip(void)
 {
     static const char Dip_[] = "Dip ";
     struct obj *potion, *obj;
-    uchar here;
     char qbuf[QBUFSZ], obuf[QBUFSZ];
     const char *shortestname; /* last resort obj name for prompt */
+    uchar here = levl[u.ux][u.uy].typ;
+    boolean is_hands, at_pool = is_pool(u.ux, u.uy),
+            at_fountain = IS_FOUNTAIN(here), at_sink = IS_SINK(here),
+            at_here = (!iflags.menu_requested
+                       && (at_pool || at_fountain || at_sink));
 
-    if (!(obj = getobj("dip", dip_ok, GETOBJ_PROMPT)))
+    obj = getobj("dip", at_here ? dip_hands_ok : dip_ok, GETOBJ_PROMPT);
+    if (!obj)
         return ECMD_CANCEL;
     if (inaccessible_equipment(obj, "dip", FALSE))
         return ECMD_OK;
 
-    shortestname = (is_plural(obj) || pair_of(obj)) ? "them" : "it";
-
+    is_hands = (obj == &hands_obj);
+    shortestname = (is_hands || is_plural(obj) || pair_of(obj)) ? "them"
+                                                                : "it";
     drink_ok_extra = 0;
-    /* preceding #dip with 'm' skips the possibility of dipping into
-       fountains and pools plus the prompting which those entail */
+    /* preceding #dip with 'm' skips the possibility of dipping into pools,
+       fountains, and sinks plus the extra prompting which those entail */
     if (!iflags.menu_requested) {
         /*
          * Bypass safe_qbuf() since it doesn't handle varying suffix without
@@ -2242,30 +2262,46 @@ dodip(void)
          * supplied type name.
          * getobj: "What do you want to dip <the object> into? [xyz or ?*] "
          */
-        Strcpy(obuf, short_oname(obj, doname, thesimpleoname,
-                             /* 128 - (24 + 54 + 1) leaves 49 for <object> */
-                                 QBUFSZ - sizeof "What do you want to dip \
+        if (is_hands) {
+            Snprintf(obuf, sizeof(obuf), "your %s",
+                     makeplural(body_part(HAND)));
+        } else {
+            Strcpy(obuf, short_oname(obj, doname, thesimpleoname,
+                                     /* 128 - (24 + 54 + 1) leaves 49 for
+                                        <object> */
+                                     QBUFSZ - sizeof "What do you want to dip\
  into? [abdeghjkmnpqstvwyzBCEFHIKLNOQRTUWXZ#-# or ?*] "));
+        }
 
-        here = levl[u.ux][u.uy].typ;
         /* Is there a fountain to dip into here? */
         if (!can_reach_floor(FALSE)) {
             ; /* can't dip something into fountain or pool if can't reach */
-        } else if (IS_FOUNTAIN(here)) {
+        } else if (at_fountain) {
             Snprintf(qbuf, sizeof(qbuf), "%s%s into the fountain?", Dip_,
-                     Verbose(3, dodip1) ? obuf : shortestname);
+                     flags.verbose ? obuf : shortestname);
             /* "Dip <the object> into the fountain?" */
             if (y_n(qbuf) == 'y') {
-                obj->pickup_prev = 0;
+                if (!is_hands)
+                    obj->pickup_prev = 0;
                 dipfountain(obj);
                 return ECMD_TIME;
             }
             ++drink_ok_extra;
-        } else if (is_pool(u.ux, u.uy)) {
+        } else if (at_sink) {
+            Snprintf(qbuf, sizeof(qbuf), "%s%s into the sink?", Dip_,
+                     flags.verbose ? obuf : shortestname);
+            if (y_n(qbuf) == 'y') {
+                if (!is_hands)
+                    obj->pickup_prev = 0;
+                dipsink(obj);
+                return ECMD_TIME;
+            }
+            ++drink_ok_extra;
+        } else if (at_pool) {
             const char *pooltype = waterbody_name(u.ux, u.uy);
 
             Snprintf(qbuf, sizeof(qbuf), "%s%s into the %s?", Dip_,
-                     Verbose(3, dodip2) ? obuf : shortestname, pooltype);
+                     flags.verbose ? obuf : shortestname, pooltype);
             /* "Dip <the object> into the {pool, moat, &c}?" */
             if (y_n(qbuf) == 'y') {
                 if (Levitation) {
@@ -2273,6 +2309,10 @@ dodip(void)
                 } else if (u.usteed && !is_swimmer(u.usteed->data)
                            && P_SKILL(P_RIDING) < P_BASIC) {
                     rider_cant_reach(); /* not skilled enough to reach */
+                } else if (is_hands || obj == uarmg) {
+                    if (!is_hands)
+                        obj->pickup_prev = 0;
+                    (void) wash_hands();
                 } else {
                     obj->pickup_prev = 0;
                     if (obj->otyp == POT_ACID)
@@ -2289,7 +2329,7 @@ dodip(void)
 
     /* "What do you want to dip <the object> into? [xyz or ?*] " */
     Snprintf(qbuf, sizeof qbuf, "dip %s into",
-             Verbose(3, dodip3) ? obuf : shortestname);
+             flags.verbose ? obuf : shortestname);
     potion = getobj(qbuf, drink_ok, GETOBJ_NOFLAGS);
     if (!potion)
         return ECMD_CANCEL;
@@ -2341,6 +2381,11 @@ potion_dip(struct obj *obj, struct obj *potion)
         pline("That is a potion bottle, not a Klein bottle!");
         return ECMD_OK;
     }
+    if (obj == &hands_obj) {
+        You("can't fit your %s into the mouth of the bottle!",
+            body_part(HAND));
+        return ECMD_OK;
+    }
 
     obj->pickup_prev = 0; /* no longer 'recently picked up' */
     potion->in_use = TRUE; /* assume it will be used up */
@@ -2378,7 +2423,7 @@ potion_dip(struct obj *obj, struct obj *potion)
                 prinv((char *) 0, obj, 0L);
                 return ECMD_TIME;
             } else {
-                pline("Nothing seems to happen.");
+                pline1(nothing_seems_to_happen);
                 goto poof;
             }
         }
@@ -2393,11 +2438,18 @@ potion_dip(struct obj *obj, struct obj *potion)
         magic = (mixture != STRANGE_OBJECT) ? objects[mixture].oc_magic
             : (objects[obj->otyp].oc_magic || objects[potion->otyp].oc_magic);
         Strcpy(qbuf, "The"); /* assume full stack */
-        if (amt > (magic ? 3 : 7)) {
-            /* trying to dip multiple potions will usually affect only a
+        if (amt > (obj->odiluted ? 2 : magic ? 3 : 7)) {
+            /* Trying to dip multiple potions will usually affect only a
                subset; pick an amount between 3 and 8, inclusive, for magic
-               potion result, between 7 and N for non-magic */
-            if (magic)
+               potion result, between 7 and N for non-magic. If diluted
+               potions are being dipped, only two are affected; this is a
+               balance fix to prevent cheap mass alchemy of the (very
+               common) potion of healing into the (very valuable) potion of
+               full healing, whilst permitting both healing->extra healing
+               and extra healing->full healing. */
+            if (obj->odiluted)
+                amt = 2;
+            else if (magic)
                 amt = rnd(min(amt, 8) - (3 - 1)) + (3 - 1); /* 1..6 + 2 */
             else
                 amt = rnd(amt - (7 - 1)) + (7 - 1); /* 1..(N-6) + 6 */

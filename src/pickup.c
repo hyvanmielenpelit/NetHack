@@ -1,4 +1,4 @@
-/* NetHack 3.7	pickup.c	$NHDT-Date: 1654760203 2022/06/09 07:36:43 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.310 $ */
+/* NetHack 3.7	pickup.c	$NHDT-Date: 1700012890 2023/11/15 01:48:10 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.348 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2012. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -28,6 +28,7 @@ static int delta_cwt(struct obj *, struct obj *);
 static long carry_count(struct obj *, struct obj *, long, boolean, int *,
                         int *);
 static int lift_object(struct obj *, struct obj *, long *, boolean);
+static void pickup_prinv(struct obj *, long, const char *);
 static boolean mbag_explodes(struct obj *, int);
 static boolean is_boh_item_gone(void);
 static void do_boh_explosion(struct obj *, boolean);
@@ -40,6 +41,7 @@ static void explain_container_prompt(boolean);
 static int traditional_loot(boolean);
 static int menu_loot(int, boolean);
 static int tip_ok(struct obj *);
+static int choose_tip_container_menu(void);
 static struct obj *tipcontainer_gettarget(struct obj *, boolean *);
 static int tipcontainer_checks(struct obj *, struct obj *, boolean);
 static char in_or_out_menu(const char *, struct obj *, boolean, boolean,
@@ -62,9 +64,10 @@ static void tipcontainer(struct obj *);
 #define Icebox (gc.current_container->otyp == ICE_BOX)
 
 static const char
-        moderateloadmsg[] = "You have a little trouble lifting",
-        nearloadmsg[] = "You have much trouble lifting",
-        overloadmsg[] = "You have extreme difficulty lifting";
+    slightloadpfx[] = "You have a little trouble",
+    moderateloadpfx[] = "You have trouble",
+    nearloadpfx[] = "You have much trouble",
+    overloadpfx[] = "You have extreme difficulty";
 
 /* BUG: this lets you look at cockatrice corpses while blind without
    touching them */
@@ -291,10 +294,34 @@ rider_corpse_revival(struct obj *obj, boolean remotely)
     return TRUE;
 }
 
+/* wand of probing zapped down; perhaps hero is levitating while blind */
 void
-deferred_decor(boolean setup) /* True: deferring, False: catching up */
+force_decor(boolean via_probing)
 {
-    if (setup) {
+    /* we don't want describe_decor() to defer feedback if hero is fumbling
+       with 1 turn left until next slip_or_trip(), or for ice_descr() to
+       omit thawing details if hero is probing when levitating while blind
+       (those will be skipped for look_here() and farlook() or autodescribe);
+       we can't control that by temporarily tweaking properties because that
+       could become noticeable if status gets updated while decor feedback
+       is being delivered */
+    gd.decor_fumble_override = TRUE;
+    gd.decor_levitate_override = via_probing;
+    /* force current terrain to be different from previous location, or
+       uninteresting if previous location was actually inside solid stone */
+    iflags.prev_decor = STONE;
+    (void) describe_decor();
+    gd.decor_fumble_override = gd.decor_levitate_override = FALSE;
+    gl.lastseentyp[u.ux][u.uy] = levl[u.ux][u.uy].typ;
+}
+
+void
+deferred_decor(
+    boolean setup) /* True: deferring, False: catching up */
+{
+    if (!flags.mention_decor) {
+        iflags.defer_decor = FALSE;
+    } else if (setup) {
         iflags.defer_decor = TRUE;
     } else {
         (void) describe_decor();
@@ -312,21 +339,23 @@ describe_decor(void)
     const char *dfeature;
     int ltyp;
 
-    if ((HFumbling & TIMEOUT) == 1L && !iflags.defer_decor) {
+    if ((HFumbling & TIMEOUT) == 1L /* about to slip_or_trip */
+        && !iflags.defer_decor
+        && !gd.decor_fumble_override) { /* probe_decor() */
         /*
-         * Work around a message sequencing issue:  avoid
+         * Work around a message sequencing issue if Fumbling's periodic
+         * timeout is about to kick in:  avoid the combination
          *  |You are back on floor.
          *  |You trip over <object>.  or  You flounder.
          * when the trip is being caused by moving on ice as hero
-         * steps off ice onto non-ice.
+         * steps off ice onto non-ice.  Defer the back-on-floor part if
+         * that is about to happen.
          */
         deferred_decor(TRUE);
         return FALSE;
     }
 
-    ltyp = levl[u.ux][u.uy].typ;
-    if (ltyp == DRAWBRIDGE_UP) /* surface for spot in front of closed db */
-        ltyp = db_under_typ(levl[u.ux][u.uy].drawbridgemask);
+    ltyp = SURFACE_AT(u.ux, u.uy);
     dfeature = dfeature_at(u.ux, u.uy, fbuf);
 
     /* we don't mention "ordinary" doors but do mention broken ones (and
@@ -337,37 +366,44 @@ describe_decor(void)
     if (doorhere || Underwater
         || (ltyp == ICE && IS_POOL(iflags.prev_decor))) /* pooleffects() */
         dfeature = 0;
+    /*
+     * TODO: if on ice, report moving between thicker and thinner ice (based
+     * on ice_descr()'s classification) as if moving onto different terrain.
+     */
 
     if (ltyp == iflags.prev_decor && !IS_FURNITURE(ltyp)) {
         res = FALSE;
     } else if (dfeature) {
         if (waterhere)
             dfeature = strcpy(fbuf, waterbody_name(u.ux, u.uy));
-        if (strcmp(dfeature, "swamp"))
+        if (strcmp(dfeature, "swamp") && ltyp != ICE)
             dfeature = an(dfeature);
 
-        if (Verbose(2, describe_decor1)) {
+        if (flags.verbose) {
             Sprintf(outbuf, "There is %s here.", dfeature);
         } else {
             if (dfeature != fbuf)
                 Strcpy(fbuf, dfeature);
             Sprintf(outbuf, "%s.", upstart(fbuf));
         }
-        pline("%s", outbuf);
+        if (ltyp == ICE && flags.mention_decor)
+            Norep("%s", outbuf);
+        else
+            pline("%s", outbuf);
     } else if (!Underwater) {
         if (IS_POOL(iflags.prev_decor)
-            || iflags.prev_decor == LAVAPOOL
+            || IS_LAVA(iflags.prev_decor)
             || iflags.prev_decor == ICE) {
-            const char *ground = surface(u.ux, u.uy);
-
-            if (iflags.last_msg != PLNMSG_BACK_ON_GROUND)
-                pline("%s %s %s.",
-                      Verbose(2, describe_decor2) ? "You are back" : "Back",
-                      (Levitation || Flying) ? "over" : "on",
-                      ground);
+            if (iflags.last_msg != PLNMSG_BACK_ON_GROUND) {
+                back_on_ground(FALSE);
+            }
         }
     }
-    iflags.prev_decor = ltyp;
+    /* describe_decor() is normally called when moving onto a different
+       type of terrain, but it is also called by pickup() even when
+       mention_decor is Off if hero can't reach floor; only adapt the next
+       describe_decor() by what has just occurred in this one when it's On */
+    iflags.prev_decor = flags.mention_decor ? ltyp : STONE;
     return res;
 }
 
@@ -627,6 +663,9 @@ pickup(int what) /* should be a long */
         return 0;
     }
 
+    /* used by pickup_object() for encumbrance feedback */
+    gp.pickup_encumbrance = 0;
+
     if (what < 0) /* pick N of something */
         count = -what;
     else /* pick anything */
@@ -839,6 +878,7 @@ pickup(int what) /* should be a long */
             check_here(n_picked > 0);
     }
  pickupdone:
+    gp.pickup_encumbrance = 0;
     add_valid_menu_class(0); /* reset */
     return (n_tried > 0);
 }
@@ -877,6 +917,14 @@ autopick_testobj(struct obj *otmp, boolean calc_costly)
     if (costly && !otmp->no_charge)
         return FALSE;
 
+    /* pickup_thrown/pickup_stolen/nopick_dropped override pickup_types and
+       exceptions */
+    if ((flags.pickup_thrown && otmp->how_lost == LOST_THROWN)
+        || (flags.pickup_stolen && otmp->how_lost == LOST_STOLEN))
+        return TRUE;
+    if (flags.nopick_dropped && otmp->how_lost == LOST_DROPPED)
+        return FALSE;
+
     /* check for pickup_types */
     pickit = (!*otypes || strchr(otypes, otmp->oclass));
 
@@ -885,9 +933,6 @@ autopick_testobj(struct obj *otmp, boolean calc_costly)
     if (ape)
         pickit = ape->grab;
 
-    /* pickup_thrown overrides pickup_types and exceptions */
-    if (!pickit)
-        pickit = (flags.pickup_thrown && otmp->was_thrown);
     return pickit;
 }
 
@@ -968,7 +1013,7 @@ query_objlist(const char *qstr,        /* query string */
     unsigned sortflags;
     glyph_info tmpglyphinfo = nul_glyphinfo;
     Loot *sortedolist, *srtoli;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     *pick_list = (menu_item *) 0;
     if (!olist && !engulfer)
@@ -1018,8 +1063,7 @@ query_objlist(const char *qstr,        /* query string */
     if (gt.this_title) {
         /* dotypeinv() supplies gt.this_title to display as initial header;
            intentionally avoid the menu_headings highlight attribute here */
-        add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                 clr, gt.this_title, MENU_ITEMFLAGS_NONE);
+        add_menu_str(win, gt.this_title);
     }
     /*
      * Run through the list and add the objects to the menu.  If
@@ -1046,13 +1090,12 @@ query_objlist(const char *qstr,        /* query string */
             if ((*allow)(curr)) {
                 /* if sorting, print type name (once only) */
                 if (sorted && !printed_type_name) {
+                    boolean with_oc_sym = (how != PICK_NONE
+                                           && iflags.menu_head_objsym);
+
                     any = cg.zeroany;
-                    add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                             iflags.menu_headings, clr,
-                             let_to_name(*pack, FALSE,
-                                         ((how != PICK_NONE)
-                                          && iflags.menu_head_objsym)),
-                             MENU_ITEMFLAGS_NONE);
+                    add_menu_heading(win,
+                                     let_to_name(*pack, FALSE, with_oc_sym));
                     printed_type_name = TRUE;
                 }
 
@@ -1079,8 +1122,7 @@ query_objlist(const char *qstr,        /* query string */
         if (sorted && n > 1) {
             Sprintf(buf, "%s Creatures",
                     digests(u.ustuck->data) ? "Swallowed" : "Engulfed");
-            add_menu(win, &nul_glyphinfo, &any, 0, 0, iflags.menu_headings,
-                     clr, buf, MENU_ITEMFLAGS_NONE);
+            add_menu_heading(win, buf);
         }
         fake_hero_object = cg.zeroobj;
         fake_hero_object.quan = 1L; /* not strictly necessary... */
@@ -1171,7 +1213,7 @@ query_category(
     boolean (*ofilter)(OBJ_P) = (boolean (*)(OBJ_P)) 0;
     boolean do_unpaid = FALSE, do_blessed = FALSE, do_cursed = FALSE,
             do_uncursed = FALSE, do_buc_unknown = FALSE, verify_All = FALSE;
-    int num_buc_types = 0, num_justpicked = 0, clr = 0;
+    int num_buc_types = 0, num_justpicked = 0, clr = NO_COLOR;
 
     *pick_list = (menu_item *) 0;
     if (!olist)
@@ -1239,9 +1281,7 @@ query_category(
         verify_All = (how == PICK_ANY) && ParanoidAutoAll;
 
         /* blank separator */
-        any = cg.zeroany;
-        add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                 ATR_NONE, NO_COLOR, "", MENU_ITEMFLAGS_NONE);
+        add_menu_str(win, "");
     }
 
     invlet = 'a';
@@ -1285,9 +1325,7 @@ query_category(
 
     if (do_unpaid || (qflags & BILLED_TYPES) || do_blessed || do_cursed
         || do_uncursed || do_buc_unknown || num_justpicked) {
-        any = cg.zeroany;
-        add_menu(win, &nul_glyphinfo, &any, 0, 0,
-                 ATR_NONE, NO_COLOR, "", MENU_ITEMFLAGS_NONE);
+        add_menu_str(win, "");
     }
 
     /* unpaid items if there are any */
@@ -1618,7 +1656,7 @@ lift_object(
        availability of open inventory slot iff not already carrying one */
     if (obj->otyp == LOADSTONE
         || (obj->otyp == BOULDER && throws_rocks(gy.youmonst.data))) {
-        if (inv_cnt(FALSE) < 52 || !carrying(obj->otyp)
+        if (inv_cnt(FALSE) < invlet_basic || !carrying(obj->otyp)
             || merge_choice(gi.invent, obj))
             return 1; /* lift regardless of current situation */
         /* if we reach here, we're out of slots and already have at least
@@ -1635,7 +1673,8 @@ lift_object(
     } else if (obj->oclass != COIN_CLASS
                /* [exception for gold coins will have to change
                    if silver/copper ones ever get implemented] */
-               && inv_cnt(FALSE) >= 52 && !merge_choice(gi.invent, obj)) {
+               && inv_cnt(FALSE) >= invlet_basic
+                        && !merge_choice(gi.invent, obj)) {
         /* if there is some gold here (and we haven't already skipped it),
            we aren't limited by the 52 item limit for it, but caller and
            "grandcaller" aren't prepared to skip stuff and then pickup
@@ -1659,14 +1698,12 @@ lift_object(
                 long savequan = obj->quan;
 
                 obj->quan = *cnt_p;
-                Strcpy(qbuf, (next_encumbr > HVY_ENCUMBER)
-                                 ? overloadmsg
-                                 : (next_encumbr > MOD_ENCUMBER)
-                                       ? nearloadmsg
-                                       : moderateloadmsg);
-                if (container)
-                    (void) strsubst(qbuf, "lifting", "removing");
-                Strcat(qbuf, " ");
+                Sprintf(qbuf, "%s %s ",
+                        (next_encumbr >= EXT_ENCUMBER) ? overloadpfx
+                        : (next_encumbr >= HVY_ENCUMBER) ? nearloadpfx
+                          : (next_encumbr >= MOD_ENCUMBER) ? moderateloadpfx
+                            : slightloadpfx,
+                        !container ? "lifting" : "removing");
                 (void) safe_qbuf(qbuf, qbuf, ".  Continue?", obj, doname,
                                  ansimpleoname, something);
                 obj->quan = savequan;
@@ -1698,10 +1735,10 @@ lift_object(
 int
 pickup_object(
     struct obj *obj,
-    long count,
+    long count, /* if non-zero, pick up a subset of this amount */
     boolean telekinesis) /* not picking it up directly by hand */
 {
-    int res, nearload;
+    int res;
 
     if (obj->quan < count) {
         impossible("pickup_object: count %ld > quan %ld?", count, obj->quan);
@@ -1770,9 +1807,9 @@ pickup_object(
 
     if (uwep && uwep == obj)
         gm.mrg_to_wielded = TRUE;
-    nearload = near_capacity();
-    prinv(nearload == SLT_ENCUMBER ? moderateloadmsg : (char *) 0, obj,
-          count);
+    pickup_prinv(obj, count, "lifting");
+    if (obj->ghostly)
+        fix_ghostly_obj(obj);
     gm.mrg_to_wielded = FALSE;
     return 1;
 }
@@ -1823,6 +1860,36 @@ pick_obj(struct obj *otmp)
         remote_burglary(ox, oy);
 
     return result;
+}
+
+/* pickup_object()/out_container() helper;
+   print an added-to-invent message for current object, limiting feedback
+   about encumbrance to the first item which causes that to change */
+static void
+pickup_prinv(
+    struct obj *obj,
+    long count,
+    const char *verb)
+{
+    char pbuf[QBUFSZ];
+    const char *prefix;
+    int nearload = near_capacity();
+
+    pbuf[0] = '\0';
+    if (nearload == gp.pickup_encumbrance) {
+        prefix = (char *) 0;
+    } else {
+        prefix = (nearload >= EXT_ENCUMBER) ? overloadpfx
+                 : (nearload >= HVY_ENCUMBER) ? nearloadpfx
+                   : (nearload >= MOD_ENCUMBER) ? moderateloadpfx
+                     : (nearload >= SLT_ENCUMBER) ? slightloadpfx
+                       : (char *) 0;
+        gp.pickup_encumbrance = nearload;
+    }
+    if (prefix)
+        Sprintf(pbuf, "%s %s", prefix, verb);
+
+    prinv(pbuf, obj, count);
 }
 
 /*
@@ -2042,7 +2109,7 @@ doloot_core(void)
     int prev_inquiry = 0;
     boolean prev_loot = FALSE;
     int num_conts = 0;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     ga.abort_looting = FALSE;
 
@@ -2310,7 +2377,7 @@ loot_mon(struct monst *mtmp, int *passed_info, boolean *prev_loot)
                 return 1;
             }
             extract_from_minvent(mtmp, otmp, TRUE, FALSE);
-            if (Verbose(2, loot_mon))
+            if (flags.verbose)
                 You("take %s off of %s.",
                     thesimpleoname(otmp), mon_nam(mtmp));
             otmp = hold_another_object(otmp, "You drop %s!", doname(otmp),
@@ -2576,10 +2643,10 @@ ck_bag(struct obj *obj)
 static int
 out_container(struct obj *obj)
 {
-    register struct obj *otmp;
-    boolean is_gold = (obj->oclass == COIN_CLASS);
-    int res, loadlev;
+    struct obj *otmp;
+    int res;
     long count;
+    boolean is_gold = (obj->oclass == COIN_CLASS);
 
     if (!gc.current_container) {
         impossible("<out> no gc.current_container?");
@@ -2618,12 +2685,7 @@ out_container(struct obj *obj)
         pick_pick(obj); /* shopkeeper feedback */
 
     otmp = addinv(obj);
-    loadlev = near_capacity();
-    prinv(loadlev ? ((loadlev < MOD_ENCUMBER)
-                        ? "You have a little trouble removing"
-                        : "You have much trouble removing")
-                  : (char *) 0,
-          otmp, count);
+    pickup_prinv(otmp, count, "removing");
 
     if (is_gold) {
         bot(); /* update character's gold piece count immediately */
@@ -3085,6 +3147,7 @@ traditional_loot(boolean put_in)
         objlist = &(gc.current_container->cobj);
         actionfunc = out_container;
         checkfunc = (int (*)(OBJ_P)) 0;
+        gp.pickup_encumbrance = 0; /* used to limit verbosity */
     }
 
     if (query_classes(selection, &one_by_one, &allflag, action, *objlist,
@@ -3112,6 +3175,8 @@ menu_loot(int retry, boolean put_in)
     int mflags, res;
     long count = 0;
 
+    gp.pickup_encumbrance = 0; /* used by out_container(); no harm in
+                                * zeroing it if about to use in_container() */
     if (retry) {
         all_categories = (retry == -2);
     } else if (flags.menu_style == MENU_FULL) {
@@ -3119,7 +3184,8 @@ menu_loot(int retry, boolean put_in)
         Sprintf(buf, "%s what type of objects?", action);
         mflags = (ALL_TYPES | UNPAID_TYPES | BUCX_TYPES | CHOOSE_ALL
                   | JUSTPICKED );
-        n = query_category(buf, put_in ? gi.invent : gc.current_container->cobj,
+        n = query_category(buf,
+                           put_in ? gi.invent : gc.current_container->cobj,
                            mflags, &pick_list, PICK_ANY);
         if (!n)
             return ECMD_OK;
@@ -3238,7 +3304,7 @@ in_or_out_menu(
     char buf[BUFSZ];
     int n;
     const char *menuselector = flags.lootabc ? abc_chars : lootchars;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     any = cg.zeroany;
     win = create_nhwindow(NHW_MENU);
@@ -3277,9 +3343,7 @@ in_or_out_menu(
         add_menu(win, &nul_glyphinfo, &any, menuselector[any.a_int], 0,
                  ATR_NONE, clr, buf, MENU_ITEMFLAGS_NONE);
     }
-    any.a_int = 0;
-    add_menu(win, &nul_glyphinfo, &any, 0, 0,
-             ATR_NONE, clr, "", MENU_ITEMFLAGS_NONE);
+    add_menu_str(win, "");
     if (more_containers) {
         any.a_int = 7; /* 'n' */
         add_menu(win, &nul_glyphinfo, &any, menuselector[any.a_int], 0,
@@ -3325,6 +3389,67 @@ tip_ok(struct obj *obj)
     return GETOBJ_DOWNPLAY;
 }
 
+/* show a menu of containers under hero,
+   and one extra entry for choosing an inventory.
+   returns ECMD_CANCEL if menu was canceled,
+   ECMD_TIME if a container was picked,
+   otherwise returns ECMD_OK. */
+static int
+choose_tip_container_menu(void)
+{
+    int n, i;
+    winid win;
+    anything any;
+    menu_item *pick_list = (menu_item *) 0;
+    struct obj dummyobj, *otmp;
+    int clr = NO_COLOR;
+
+    any = cg.zeroany;
+    win = create_nhwindow(NHW_MENU);
+    start_menu(win, MENU_BEHAVE_STANDARD);
+
+    for (otmp = gl.level.objects[u.ux][u.uy], i = 0; otmp;
+         otmp = otmp->nexthere)
+        if (Is_container(otmp)) {
+            ++i;
+            any.a_obj = otmp;
+            add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
+                     clr, doname(otmp), MENU_ITEMFLAGS_NONE);
+        }
+    if (gi.invent) {
+        add_menu_str(win, "");
+        any.a_obj = &dummyobj;
+        /* use 'i' for inventory unless there are so many
+           containers that it's already being used */
+        i = (i <= 'i' - 'a' && !flags.lootabc) ? 'i' : 0;
+        add_menu(win, &nul_glyphinfo, &any, i, 0, ATR_NONE,
+                 clr, "tip something being carried",
+                 MENU_ITEMFLAGS_SELECTED);
+    }
+    end_menu(win, "Tip which container?");
+    n = select_menu(win, PICK_ONE, &pick_list);
+    destroy_nhwindow(win);
+    /*
+     * Deal with quirk of preselected item in pick-one menu:
+     * n ==  0 => picked preselected entry, toggling it off;
+     * n ==  1 => accepted preselected choice via SPACE or RETURN;
+     * n ==  2 => picked something other than preselected entry;
+     * n == -1 => cancelled via ESC;
+     */
+    otmp = (n <= 0) ? (struct obj *) 0 : pick_list[0].item.a_obj;
+    if (n > 1 && otmp == &dummyobj)
+        otmp = pick_list[1].item.a_obj;
+    if (pick_list)
+        free((genericptr_t) pick_list);
+    if (otmp && otmp != &dummyobj) {
+        tipcontainer(otmp);
+        return ECMD_TIME;
+    }
+    if (n == -1)
+        return ECMD_CANCEL;
+    return ECMD_OK;
+}
+
 /* #tip command -- empty container contents onto floor */
 int
 dotip(void)
@@ -3358,63 +3483,13 @@ dotip(void)
         && (!iflags.menu_requested
             || (flags.menu_style == MENU_TRADITIONAL && boxes > 1))) {
         Sprintf(buf, "You can't tip %s while carrying so much.",
-                !Verbose(2, dotip)
-                    ? "a container" : (boxes > 1) ? "one" : "it");
+                !flags.verbose ? "a container" : (boxes > 1) ? "one" : "it");
         if (!check_capacity(buf) && able_to_loot(cc.x, cc.y, FALSE)) {
             if (boxes > 1) {
-                /* use menu to pick a container to tip */
-                int n, i;
-                winid win;
-                anything any;
-                menu_item *pick_list = (menu_item *) 0;
-                struct obj dummyobj, *otmp;
-                int clr = 0;
-
-                any = cg.zeroany;
-                win = create_nhwindow(NHW_MENU);
-                start_menu(win, MENU_BEHAVE_STANDARD);
-
-                for (cobj = gl.level.objects[cc.x][cc.y], i = 0; cobj;
-                     cobj = cobj->nexthere)
-                    if (Is_container(cobj)) {
-                        ++i;
-                        any.a_obj = cobj;
-                        add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                                 clr, doname(cobj), MENU_ITEMFLAGS_NONE);
-                    }
-                if (gi.invent) {
-                    any = cg.zeroany;
-                    add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE,
-                             clr, "", MENU_ITEMFLAGS_NONE);
-                    any.a_obj = &dummyobj;
-                    /* use 'i' for inventory unless there are so many
-                       containers that it's already being used */
-                    i = (i <= 'i' - 'a' && !flags.lootabc) ? 'i' : 0;
-                    add_menu(win, &nul_glyphinfo, &any, i, 0, ATR_NONE,
-                             clr, "tip something being carried",
-                             MENU_ITEMFLAGS_SELECTED);
-                }
-                end_menu(win, "Tip which container?");
-                n = select_menu(win, PICK_ONE, &pick_list);
-                destroy_nhwindow(win);
-                /*
-                 * Deal with quirk of preselected item in pick-one menu:
-                 * n ==  0 => picked preselected entry, toggling it off;
-                 * n ==  1 => accepted preselected choice via SPACE or RETURN;
-                 * n ==  2 => picked something other than preselected entry;
-                 * n == -1 => cancelled via ESC;
-                 */
-                otmp = (n <= 0) ? (struct obj *) 0 : pick_list[0].item.a_obj;
-                if (n > 1 && otmp == &dummyobj)
-                    otmp = pick_list[1].item.a_obj;
-                if (pick_list)
-                    free((genericptr_t) pick_list);
-                if (otmp && otmp != &dummyobj) {
-                    tipcontainer(otmp);
-                    return ECMD_TIME;
-                }
-                if (n == -1)
-                    return ECMD_OK;
+                int res;
+                /* pick one container via menu or ... */
+                if ((res = choose_tip_container_menu()) != ECMD_OK)
+                    return res;
                 /* else pick-from-gi.invent below */
             } else {
                 for (cobj = gl.level.objects[cc.x][cc.y]; cobj; cobj = nobj) {
@@ -3621,6 +3696,7 @@ tipcontainer(struct obj *box) /* or bag */
                     (void) add_to_container(targetbox, otmp);
                 }
             } else if (highdrop) {
+                otmp->how_lost = LOST_DROPPED;
                 /* might break or fall down stairs; handles altars itself */
                 hitfloor(otmp, TRUE);
             } else {
@@ -3633,6 +3709,7 @@ tipcontainer(struct obj *box) /* or bag */
                     pline("%s%c", doname(otmp), nobj ? ',' : '.');
                     iflags.last_msg = PLNMSG_OBJNAM_ONLY;
                 }
+                otmp->how_lost = LOST_DROPPED;
                 dropy(otmp);
                 if (iflags.last_msg != PLNMSG_OBJNAM_ONLY)
                     terse = FALSE; /* terse formatting has been interrupted */
@@ -3693,7 +3770,7 @@ tipcontainer_gettarget(
     menu_item *pick_list = (menu_item *) 0;
     struct obj dummyobj, *otmp;
     boolean hands_available = TRUE, exclude_it;
-    int clr = 0;
+    int clr = NO_COLOR;
 
 #if 0   /* [skip potential early return so that menu response is needed
          *  regardless of whether other containers are being carried] */
@@ -3717,9 +3794,7 @@ tipcontainer_gettarget(
     add_menu(win, &nul_glyphinfo, &any, '-', 0, ATR_NONE, clr,
              /* [TODO? vary destination string depending on surface()] */
              "on the floor", MENU_ITEMFLAGS_SELECTED);
-    any = cg.zeroany;
-    add_menu(win, &nul_glyphinfo, &any, 0, 0, ATR_NONE, clr,
-             "", MENU_ITEMFLAGS_NONE);
+    add_menu_str(win, "");
 
     n_conts = 0;
     for (otmp = gi.invent; otmp; otmp = otmp->nobj) {
@@ -3836,7 +3911,7 @@ tipcontainer_checks(
 
         if (box->spe < old_spe) {
             if (bag && !totseen)
-                pline("Nothing seems to happen.");
+                pline1(nothing_seems_to_happen);
             /* check_unpaid wants to see a non-zero charge count */
             box->spe = old_spe;
             check_unpaid_usage(box, TRUE);

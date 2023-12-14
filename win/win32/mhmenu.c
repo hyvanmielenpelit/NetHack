@@ -32,6 +32,7 @@ typedef struct mswin_menu_item {
     char accelerator;
     char group_accel;
     int attr;
+    int color;
     char str[NHMENU_STR_SIZE];
     boolean presel;
     unsigned int itemflags;
@@ -623,6 +624,7 @@ onMSNHCommand(HWND hWnd, WPARAM wParam, LPARAM lParam)
         data->menui.menu.items[new_item].accelerator = msg_data->accelerator;
         data->menui.menu.items[new_item].group_accel = msg_data->group_accel;
         data->menui.menu.items[new_item].attr = msg_data->attr;
+        data->menui.menu.items[new_item].color = msg_data->color;
         strncpy(data->menui.menu.items[new_item].str, msg_data->str,
                 NHMENU_STR_SIZE);
         /* prevent & being interpreted as a mnemonic start */
@@ -989,9 +991,6 @@ onDrawItem(HWND hWnd, WPARAM wParam, LPARAM lParam)
     char *p, *p1;
     int column;
     int spacing = 0;
-
-    int color = NO_COLOR, attr;
-    boolean menucolr = FALSE;
     double monitorScale = win10_monitor_scale(hWnd);
     int tileXScaled = (int) (TILE_X * monitorScale);
     int tileYScaled = (int) (TILE_Y * monitorScale);
@@ -1018,6 +1017,9 @@ onDrawItem(HWND hWnd, WPARAM wParam, LPARAM lParam)
                          menu_fg_brush
                              ? menu_fg_color
                              : (COLORREF) GetSysColor(DEFAULT_COLOR_FG_MENU));
+
+    if (item->color != NO_COLOR)
+        (void) SetTextColor(lpdis->hDC, nhcolor_to_RGB(item->color));
 
     GetTextMetrics(lpdis->hDC, &tm);
     spacing = tm.tmAveCharWidth;
@@ -1056,15 +1058,6 @@ onDrawItem(HWND hWnd, WPARAM wParam, LPARAM lParam)
         if (item->accelerator != 0) {
             buf[0] = item->accelerator;
             buf[1] = '\x0';
-
-            if (iflags.use_menu_color
-                && (menucolr = get_menu_coloring(item->str, &color, &attr))) {
-                cached_font * menu_font = mswin_get_font(NHW_MENU, attr, lpdis->hDC, FALSE);
-                SelectObject(lpdis->hDC, menu_font->hFont);
-                if (color != NO_COLOR)
-                    SetTextColor(lpdis->hDC, nhcolor_to_RGB(color));
-            }
-
             SetRect(&drawRect, x, lpdis->rcItem.top, lpdis->rcItem.right,
                     lpdis->rcItem.bottom);
             DrawText(lpdis->hDC, NH_A2W(buf, wbuf, 2), 1, &drawRect,

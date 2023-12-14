@@ -794,7 +794,7 @@ X11_add_menu(winid window,
              char ch,  /* selector letter; 0 if not selectable */
              char gch, /* group accelerator (0 = no group) */
              int attr,
-             int clr UNUSED,
+             int clr,
              const char *str,
              unsigned itemflags)
 {
@@ -813,6 +813,7 @@ X11_add_menu(winid window,
     item->next = (x11_menu_item *) 0;
     item->identifier = *identifier;
     item->attr = attr;
+    item->color = clr;
     item->itemflags = itemflags;
     item->selected = item->preselected = preselected;
     item->pick_count = -1L;
@@ -1313,9 +1314,9 @@ menu_create_entries(struct xwindow *wp, struct menu *curr_menu)
         XtSetArg(args[num_args], nhStr(XtNborderWidth), 0); num_args++;
         XtSetArg(args[num_args], nhStr(XtNvertDistance), 0); num_args++;
 
-        if (!iflags.use_menu_color || wp->menu_information->disable_mcolors
-            || !get_menu_coloring(curr->str, &color, &attr))
-            attr = curr->attr;
+        attr = curr->attr;
+        if (!wp->menu_information->disable_mcolors)
+            color = curr->color;
 
         if (color != NO_COLOR) {
             if (attr != ATR_INVERSE)

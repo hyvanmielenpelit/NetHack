@@ -1138,9 +1138,7 @@ slip_or_trip(void)
     struct obj *otmp = vobj_at(u.ux, u.uy), *otmp2;
     const char *what;
     char buf[BUFSZ];
-    boolean on_foot = TRUE;
-    if (u.usteed)
-        on_foot = FALSE;
+    boolean on_foot = !u.usteed;
 
     if (otmp && on_foot && !u.uinwater && is_pool(u.ux, u.uy))
         otmp = 0;
@@ -1175,14 +1173,26 @@ slip_or_trip(void)
                     an(mons[otmp->corpsenm].pmnames[NEUTRAL]));
             instapetrify(gk.killer.name);
         }
-    } else if (rn2(3) && is_ice(u.ux, u.uy)) {
-        pline("%s %s%s on the ice.",
-              u.usteed ? upstart(x_monnam(u.usteed,
-                                      (has_mgivenname(u.usteed)) ? ARTICLE_NONE
-                                                                 : ARTICLE_THE,
-                                      (char *) 0, SUPPRESS_SADDLE, FALSE))
+    } else if ((HFumbling & FROMOUTSIDE) || (is_ice(u.ux, u.uy) && !rn2(3))) {
+        /* is fumbling from ice alone? */
+        boolean ice_only = !(EFumbling || (HFumbling & ~FROMOUTSIDE));
+
+        pline("%s %s%s %s the ice.",
+              u.usteed ? upstart(x_monnam(u.usteed, ARTICLE_THE, (char *) 0,
+                                          SUPPRESS_SADDLE, FALSE))
                        : "You",
-              rn2(2) ? "slip" : "slide", on_foot ? "" : "s");
+              rn2(2) ? "slip" : "slide", on_foot ? "" : "s",
+              /* sometimes slipping due to ice occurs during turn that hero
+                 has just moved off the ice; phrase things differently then */
+              is_ice(u.ux, u.uy) ? "on" : "off");
+        /* fumbling outside of ice while mounted always causes the hero to
+           fall from the saddle, so to avoid a counterintuitive effect where
+           ice makes riding _less_ hazardous, unconditionally dismount if
+           fumbling is from a non-ice source */
+        if (!on_foot && (!ice_only || !rn2(3))) {
+            You("lose your balance.");
+            dismount_steed(DISMOUNT_FELL);
+        }
     } else {
         if (on_foot) {
             switch (rn2(4)) {
@@ -2315,7 +2325,7 @@ write_timer(NHFILE* nhfp, timer_element* timer)
     case TIMER_OBJECT:
         if (timer->needs_fixup) {
             if (nhfp->structlevel)
-                bwrite(nhfp->fd, (genericptr_t)timer, sizeof(timer_element));
+                bwrite(nhfp->fd, (genericptr_t) timer, sizeof(timer_element));
         } else {
             /* replace object pointer with id */
             arg_save.a_obj = timer->arg.a_obj;
@@ -2323,7 +2333,7 @@ write_timer(NHFILE* nhfp, timer_element* timer)
             timer->arg.a_uint = (arg_save.a_obj)->o_id;
             timer->needs_fixup = 1;
             if (nhfp->structlevel)
-                bwrite(nhfp->fd, (genericptr_t)timer, sizeof(timer_element));
+                bwrite(nhfp->fd, (genericptr_t) timer, sizeof(timer_element));
             timer->arg.a_obj = arg_save.a_obj;
             timer->needs_fixup = 0;
         }
@@ -2332,7 +2342,7 @@ write_timer(NHFILE* nhfp, timer_element* timer)
     case TIMER_MONSTER:
         if (timer->needs_fixup) {
             if (nhfp->structlevel)
-                bwrite(nhfp->fd, (genericptr_t)timer, sizeof(timer_element));
+                bwrite(nhfp->fd, (genericptr_t) timer, sizeof(timer_element));
         } else {
             /* replace monster pointer with id */
             arg_save.a_monst = timer->arg.a_monst;
@@ -2340,7 +2350,7 @@ write_timer(NHFILE* nhfp, timer_element* timer)
             timer->arg.a_uint = (arg_save.a_monst)->m_id;
             timer->needs_fixup = 1;
             if (nhfp->structlevel)
-                bwrite(nhfp->fd, (genericptr_t)timer, sizeof(timer_element));
+                bwrite(nhfp->fd, (genericptr_t) timer, sizeof(timer_element));
             timer->arg.a_monst = arg_save.a_monst;
             timer->needs_fixup = 0;
         }

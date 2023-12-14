@@ -79,7 +79,7 @@ l_selection_gc(lua_State *L)
 static struct selectionvar *
 l_selection_to(lua_State *L, int index)
 {
-    struct selectionvar *sel = (struct selectionvar *)lua_touserdata(L, index);
+    struct selectionvar *sel = (struct selectionvar *) lua_touserdata(L, index);
 
     if (!sel)
         nhl_error(L, "Selection error");
@@ -203,7 +203,7 @@ l_selection_numpoints(lua_State *L)
     struct selectionvar *sel = l_selection_check(L, 1);
     coordxy x, y;
     int ret = 0;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     selection_getbounds(sel, &rect);
 
@@ -281,7 +281,7 @@ l_selection_and(lua_State *L)
     struct selectionvar *sela = l_selection_check(L, 1);
     struct selectionvar *selb = l_selection_check(L, 2);
     struct selectionvar *selr = l_selection_push_new(L);
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     rect_bounds(sela->bounds, selb->bounds, &rect);
 
@@ -304,7 +304,7 @@ l_selection_or(lua_State *L)
     struct selectionvar *sela = l_selection_check(L, 1);
     struct selectionvar *selb = l_selection_check(L, 2);
     struct selectionvar *selr = l_selection_push_new(L);
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     rect_bounds(sela->bounds, selb->bounds, &rect);
 
@@ -328,7 +328,7 @@ l_selection_xor(lua_State *L)
     struct selectionvar *sela = l_selection_check(L, 1);
     struct selectionvar *selb = l_selection_check(L, 2);
     struct selectionvar *selr = l_selection_push_new(L);
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     rect_bounds(sela->bounds, selb->bounds, &rect);
 
@@ -355,7 +355,7 @@ l_selection_sub(lua_State *L)
     struct selectionvar *sela = l_selection_check(L, 1);
     struct selectionvar *selb = l_selection_check(L, 2);
     struct selectionvar *selr = l_selection_push_new(L);
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     rect_bounds(sela->bounds, selb->bounds, &rect);
 
@@ -445,7 +445,7 @@ static int
 l_selection_getbounds(lua_State *L)
 {
     struct selectionvar *sel = l_selection_check(L, 1);
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     selection_getbounds(sel, &rect);
     lua_settop(L, 0);
@@ -580,12 +580,12 @@ static int
 l_selection_randline(lua_State *L)
 {
     int argc = lua_gettop(L);
-    struct selectionvar *sel = (struct selectionvar *) 0;
+    struct selectionvar *sel;
     coordxy x1 = 0, y1 = 0, x2 = 0, y2 = 0;
     int roughness = 7;
 
     if (argc == 6) {
-        sel = l_selection_check(L, 1);
+        (void) l_selection_check(L, 1);
         x1 = (coordxy) luaL_checkinteger(L, 2);
         y1 = (coordxy) luaL_checkinteger(L, 3);
         x2 = (coordxy) luaL_checkinteger(L, 4);
@@ -600,7 +600,7 @@ l_selection_randline(lua_State *L)
         roughness = (int) luaL_checkinteger(L, 5);
         lua_pop(L, 5);
         (void) l_selection_new(L);
-        sel = l_selection_check(L, 1);
+        (void) l_selection_check(L, 1);
     }
 
     get_location_coord(&x1, &y1, ANY_LOC,
@@ -904,7 +904,7 @@ l_selection_iterate(lua_State *L)
     int argc = lua_gettop(L);
     struct selectionvar *sel = (struct selectionvar *) 0;
     int x, y;
-    NhRect rect;
+    NhRect rect = cg.zeroNhRect;
 
     if (argc == 2 && lua_type(L, 2) == LUA_TFUNCTION) {
         sel = l_selection_check(L, 1);

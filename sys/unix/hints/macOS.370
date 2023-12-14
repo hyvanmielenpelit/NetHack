@@ -20,6 +20,21 @@
 # note: '#-INCLUDE' is not just a comment; multiw-1 contains sections 1 to 2
 #-INCLUDE multiw-1.370
 
+HINTSVERSION := 370
+
+ifdef MAKEFILE_TOP
+ifeq ($(MAKELEVEL),0)
+PRECHECK+=checkmakefiles
+# all files included from this hints file get listed
+# in HINTSINCLNAMES (without suffix and without a path)
+HINTSINCLNAMES := compiler cross-pre cross-post \
+		gbdates-pre gbdates-post \
+		multiw-1 multiw-2 misc \
+		multisnd1-pre multisnd2-pre multisnd-post
+HINTSINCLFILES := $(addsuffix .$(HINTSVERSION), $(HINTSINCLNAMES))
+endif
+endif
+
 ifneq "$(USEMACPORTS)" "1"
 HAVE_HOMEBREW := $(shell expr `which -s brew; echo $$?` = 0)
 endif
@@ -68,10 +83,14 @@ endif   # HAVE_MACPORTS
 endif   # QTDIR
 endif   # WANT_WIN_QT
 
-# multiw-3.370 must come after compiler.370
+# misc.370 must come after compiler.370
 # and after QTDIR is defined
 
-#-INCLUDE multiw-3.370
+#-INCLUDE misc.370
+
+# manpages directory
+MANDIR=/usr/local/share/man/man6
+PREMANPAGES = checkmandir
 
 ifeq "$(USE_ASAN)" "1"
 CFLAGS +=-fsanitize=address
@@ -485,6 +504,15 @@ endif   # MAKEFILE_SRC
 #-INCLUDE multisnd-post.370
 #
 
+ifdef MAKEFILE_TOP
+ifeq ($(MAKELEVEL),0)
+.PHONY: checkmakefiles
+checkmakefiles:
+	@$(MAKE) -f sys/unix/Makefile.check \
+		HINTSFILE="$(HINTSFILE)" HINTSINCLFILES="$(HINTSINCLFILES)"
+endif
+endif
+
 ifdef WANT_LIBNH
 $(TARGETPFX)libnh.a: $(HOBJ) $(LIBNHSYSOBJ) ../lib/lua/liblua.a
 	$(AR) rcs $@ $(HOBJ) $(LIBNHSYSOBJ) ../lib/lua/liblua.a
@@ -494,6 +522,11 @@ $(TARGETPFX)libnhmain.o : ../sys/libnh/libnhmain.c $(HACK_H)
 $(TARGETPFX)winshim.o : ../win/shim/winshim.c $(HACK_H)
 	$(CC) $(CFLAGS) -c -o$@ $<
 endif  # WANT_LIBNH
+
+ifdef MAKEFILE_DOC
+checkmandir:
+	@( if test -d $(MANDIR) ; then true ; else mkdir -p $(MANDIR) ; fi )
+endif  # MAKEFILE_DOC
 
 # -- bundle ---
 #

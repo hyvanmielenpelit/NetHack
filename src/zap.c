@@ -1,4 +1,4 @@
-/* NetHack 3.7	zap.c	$NHDT-Date: 1686178723 2023/06/07 22:58:43 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.472 $ */
+/* NetHack 3.7	zap.c	$NHDT-Date: 1702023277 2023/12/08 08:14:37 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.498 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2013. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -23,7 +23,8 @@ static void zhitu(int, int, const char *, coordxy, coordxy);
 static void revive_egg(struct obj *);
 static boolean zap_steed(struct obj *);
 static void skiprange(int, int *, int *);
-static void maybe_explode_trap(struct trap *, struct obj *);
+static void maybe_explode_trap(struct trap *, struct obj *, boolean *);
+static void zap_map(coordxy, coordxy, struct obj *);
 static int zap_hit(int, int);
 static void disintegrate_mon(struct monst *, int, const char *);
 static int adtyp_to_prop(int);
@@ -152,7 +153,7 @@ bhitm(struct monst *mtmp, struct obj *otmp)
     boolean reveal_invis = FALSE, learn_it = FALSE;
     boolean dbldam = Role_if(PM_KNIGHT) && u.uhave.questart;
     boolean skilled_spell, helpful_gesture = FALSE;
-    int dmg, otyp = otmp->otyp;
+    int dmg, otyp = otmp->otyp; /* otmp is not NULL */
     const char *zap_type_text = "spell";
     struct obj *obj;
     boolean disguised_mimic = (mtmp->data->mlet == S_MIMIC
@@ -162,7 +163,7 @@ bhitm(struct monst *mtmp, struct obj *otmp)
         reveal_invis = FALSE;
 
     gn.notonhead = (mtmp->mx != gb.bhitpos.x || mtmp->my != gb.bhitpos.y);
-    skilled_spell = (otmp && otmp->oclass == SPBOOK_CLASS && otmp->blessed);
+    skilled_spell = (otmp->oclass == SPBOOK_CLASS && otmp->blessed);
 
     switch (otyp) {
     case WAN_STRIKING:
@@ -2164,8 +2165,20 @@ bhito(struct obj *obj, struct obj *otmp)
                     (void) display_cinventory(obj);
                 }
                 res = 1;
-            } else if (obj->otyp == TIN)
+            } else if (obj->otyp == TIN) {
+                /* don't learn wand if tin is already known */
+                if (!obj->known || !obj->cknown)
+                    res = 1;
                 obj->known = 1;
+                set_cknown_lknown(obj); /* if TIN obj->cknown = 1 */
+            } else if (obj->otyp == EGG) {
+                /* if egg is unhatchable, probing it won't learn wand
+                   because even when flagged as known, it's just "an egg" */
+                if (!obj->known && obj->corpsenm != NON_PM)
+                    res = 1;
+                obj->known = 1;
+                /* [should this call learn_egg_type()?] */
+            }
             if (res)
                 learn_it = TRUE;
             break;
@@ -2210,9 +2223,7 @@ bhito(struct obj *obj, struct obj *otmp)
         case WAN_CANCELLATION:
         case SPE_CANCELLATION:
             cancel_item(obj);
-#ifdef TEXTCOLOR
             newsym(obj->ox, obj->oy); /* might change color */
-#endif
             break;
         case SPE_DRAIN_LIFE:
             (void) drain_item(obj, TRUE);
@@ -3081,13 +3092,12 @@ cancel_monst(struct monst *mdef, struct obj *obj, boolean youattack,
 static boolean
 zap_updown(struct obj *obj) /* wand or spell */
 {
-    boolean striking = FALSE, disclose = FALSE;
+    boolean striking = FALSE, disclose = FALSE, map_zapped = FALSE;
     coordxy x, y, xx, yy;
     int ptmp;
     struct obj *otmp;
     struct engr *e;
     struct trap *ttmp;
-    char buf[BUFSZ];
     stairway *stway = gs.stairs;
 
     /* some wands have special effects other than normal bhitpile */
@@ -3101,9 +3111,24 @@ zap_updown(struct obj *obj) /* wand or spell */
         ptmp = 0;
         if (u.dz < 0) {
             You("probe towards the %s.", ceiling(x, y));
-        } else {
+        } else { /* down */
+            const char *surf;
+            schar ltyp, rememberedltyp = gl.lastseentyp[x][y];
+
             ptmp += bhitpile(obj, bhito, x, y, u.dz);
-            You("probe beneath the %s.", surface(x, y));
+            /* sequencing: zap_map() calls force_decor() for ice or furniture;
+               we need to call it before probing for buried objects */
+            ltyp = SURFACE_AT(x, y);
+            zap_map(x, y, obj);
+            map_zapped = TRUE;
+            if (ltyp == ICE || IS_FURNITURE(ltyp)) {
+                surf = "it";
+                if (gl.lastseentyp[x][y] != rememberedltyp)
+                    ptmp += 1;
+            } else {
+                surf = the(surface(x, y));
+            }
+            You("probe beneath %s.", surf);
             ptmp += display_binventory(x, y, TRUE);
         }
         if (!ptmp)
@@ -3231,43 +3256,10 @@ zap_updown(struct obj *obj) /* wand or spell */
         /* zapping downward */
         (void) bhitpile(obj, bhito, x, y, u.dz);
 
-        /* subset of engraving effects; none sets `disclose' */
-        if ((e = engr_at(x, y)) != 0 && e->engr_type != HEADSTONE) {
-            switch (obj->otyp) {
-            case WAN_POLYMORPH:
-            case SPE_POLYMORPH:
-                del_engr(e);
-                make_engr_at(x, y, random_engraving(buf), gm.moves, 0);
-                break;
-            case WAN_CANCELLATION:
-            case SPE_CANCELLATION:
-            case WAN_MAKE_INVISIBLE:
-                del_engr(e);
-                break;
-            case WAN_TELEPORTATION:
-            case SPE_TELEPORT_AWAY:
-                rloc_engr(e);
-                break;
-            case SPE_STONE_TO_FLESH:
-                if (e->engr_type == ENGRAVE) {
-                    /* only affects things in stone */
-                    pline_The(Hallucination
-                                  ? "floor runs like butter!"
-                                  : "edges on the floor get smoother.");
-                    wipe_engr_at(x, y, d(2, 4), TRUE);
-                }
-                break;
-            case WAN_STRIKING:
-            case SPE_FORCE_BOLT:
-                wipe_engr_at(x, y, d(2, 4), TRUE);
-                break;
-            default:
-                break;
-            }
-        }
-
-        maybe_explode_trap(ttmp, obj);
-        /* note: ttmp might be now gone */
+        /* note: engraving handling that used to be here has been moved
+           to zap_map() */
+        if (!map_zapped)
+            zap_map(x, y, obj);
 
     } else if (u.dz < 0) {
         /* zapping upward */
@@ -3439,7 +3431,7 @@ hit(const char *str,    /* zap text or missile name */
     const char *force)  /* usually either "." or "!" via exclam() */
 {
     boolean verbosely = (mtmp == &gy.youmonst
-                         || (Verbose(3, hit)
+                         || (flags.verbose
                              && (cansee(gb.bhitpos.x, gb.bhitpos.y)
                                  || canspotmon(mtmp) || engulfing_u(mtmp))));
 
@@ -3455,7 +3447,7 @@ miss(const char *str, struct monst *mtmp)
 {
     pline("%s %s %s.", The(str), vtense(str, "miss"),
           ((cansee(gb.bhitpos.x, gb.bhitpos.y) || canspotmon(mtmp))
-           && Verbose(3, miss)) ? mon_nam(mtmp) : "it");
+           && flags.verbose) ? mon_nam(mtmp) : "it");
 }
 
 static void
@@ -3470,11 +3462,14 @@ skiprange(int range, int *skipstart, int *skipend)
         *skipend = tmp - 1;
 }
 
-/* maybe explode a trap hit by object otmp's effect;
+/* Maybe explode a trap hit by object otmp's effect;
    cancellation beam hitting a magical trap causes an explosion.
-   might delete the trap.  */
+   Might delete the trap; won't destroy otmp. */
 static void
-maybe_explode_trap(struct trap *ttmp, struct obj *otmp)
+maybe_explode_trap(
+    struct trap *ttmp,
+    struct obj *otmp,
+    boolean *learn_it)
 {
     if (!ttmp || !otmp)
         return;
@@ -3486,16 +3481,200 @@ maybe_explode_trap(struct trap *ttmp, struct obj *otmp)
             if (cansee(x, y)) {
                 ttmp->tseen = 1;
                 newsym(x, y);
+                *learn_it = TRUE;
             }
         } else if (is_magical_trap(ttmp->ttyp)) {
-            if (!Deaf)
+            int seeit = cansee(x, y);
+
+            if (!Deaf) {
+                Soundeffect(se_kaboom, 80);
                 pline("Kaboom!");
+            }
+            /* note: this explosion mustn't destroy otmp */
             explode(x, y, -WAN_CANCELLATION,
-                    20+d(3,6), TRAP_EXPLODE, EXPL_MAGICAL);
+                    20 + d(3, 6), TRAP_EXPLODE, EXPL_MAGICAL);
             deltrap(ttmp);
             newsym(x, y);
+            if (seeit)
+                *learn_it = TRUE;
         }
     }
+}
+
+/* zap_map() occurs before hitting monsters or objects and handles wands or
+   spells that don't dish out 'elemental' damage */
+static void
+zap_map(
+    coordxy x, coordxy y,
+    struct obj *obj) /* zapped wand, or book for cast spell */
+{
+    struct trap *ttmp = t_at(x, y);
+    coordxy dbx = x, dby = y; /* might be changed by drawbridge handling */
+    boolean learn_it = FALSE;
+
+    /*
+     * We handle drawbridge for lateral zaps; zap_updown() handles up/down.
+     * Engravings only get hit by down zaps and we handle that here.
+     */
+
+    /* cancellation */
+    maybe_explode_trap(ttmp, obj, &learn_it);
+    ttmp = t_at(x, y); /* refresh in case trap was altered or is gone */
+
+    if (u.dz > 0) { /* zapping down */
+        char ebuf[BUFSZ];
+        struct engr *e = engr_at(x, y);
+
+        /* subset of engraving effects; none sets `disclose' */
+        if (e && e->engr_type != HEADSTONE) {
+            switch (obj->otyp) {
+            case WAN_POLYMORPH:
+            case SPE_POLYMORPH:
+                del_engr(e);
+                make_engr_at(x, y, random_engraving(ebuf), gm.moves, 0);
+                break;
+            case WAN_CANCELLATION:
+            case SPE_CANCELLATION:
+            case WAN_MAKE_INVISIBLE:
+                del_engr(e);
+                break;
+            case WAN_TELEPORTATION:
+            case SPE_TELEPORT_AWAY:
+                rloc_engr(e);
+                break;
+            case SPE_STONE_TO_FLESH:
+                if (e->engr_type == ENGRAVE) {
+                    /* only affects things in stone */
+                    pline_The(Hallucination
+                                  ? "floor runs like butter!"
+                                  : "edges on the floor get smoother.");
+                    wipe_engr_at(x, y, d(2, 4), TRUE);
+                }
+                break;
+            case WAN_STRIKING:
+            case SPE_FORCE_BOLT:
+                wipe_engr_at(x, y, d(2, 4), TRUE);
+                break;
+            default:
+                break;
+            }
+        }
+
+    } else if (!u.dz) {
+        int ltyp = levl[x][y].typ;
+
+        if (find_drawbridge(&dbx, &dby)) {
+            switch (obj->otyp) {
+            case WAN_OPENING:
+            case SPE_KNOCK:
+                /* dbwall: 'closed door' of raised drawbridge */
+                if (is_db_wall(x, y)) {
+                    if (cansee(dbx, dby) || cansee(x, y))
+                        learn_it = TRUE;
+                    open_drawbridge(dbx, dby);
+                }
+                break;
+            case WAN_LOCKING:
+            case SPE_WIZARD_LOCK:
+                /* drawbridge_down: span of lowered drawbridge */
+                if ((cansee(dbx, dby) || cansee(x, y))
+                    && levl[dbx][dby].typ == DRAWBRIDGE_DOWN)
+                    learn_it = TRUE;
+                close_drawbridge(dbx, dby);
+                break;
+            case WAN_STRIKING:
+            case SPE_FORCE_BOLT:
+                /* !drawbridge_up: not spot in front of raised bridge,
+                   so either span of lowered bridge or portcullis */
+                if (ltyp != DRAWBRIDGE_UP) {
+                    learn_it = TRUE;
+                    destroy_drawbridge(dbx, dby);
+                }
+                break;
+            }
+        } /* find_drawbridge */
+    } /* !u.uz */
+
+    if (obj->otyp == WAN_PROBING) {
+        schar ltyp;
+        /*
+         * Probing, either up/down or lateral.
+         */
+
+        /* map unseen terrain */
+        if (!cansee(x, y)) {
+            int oldglyph = glyph_at(x, y);
+
+            show_map_spot(x, y, FALSE);
+            if (oldglyph != glyph_at(x, y)) {
+                /* TODO: need to give some message */
+                learn_it = TRUE;
+            }
+        }
+        ltyp = SURFACE_AT(x, y);
+        /* secret door gets revealed, converted into regular door */
+        if (ltyp == SDOOR) {
+            cvt_sdoor_to_door(&levl[x][y]); /* .typ = DOOR */
+            newsym(x, y);
+            if (cansee(x, y)) {
+                pline("Probing reveals a secret door.");
+                learn_it = TRUE;
+            } else if (Is_rogue_level(&u.uz)) { /* from zap_over_floor() */
+                draft_message(FALSE); /* "You feel a draft." (open doorway) */
+            }
+
+        /* secret corridor likewise, although only ones within view will
+           still be secret; for the !cansee(x,y) case, show_map_spot()
+           above has already converted the spot to regular corridor */
+        } else if (ltyp == SCORR) {
+            levl[x][y].typ = CORR;
+            unblock_point(x, y);
+            newsym(x, y);
+            pline("Probing exposes a secret corridor.");
+            learn_it = TRUE;
+
+        /* if on or over ice, describe it ("solid ice", "thin ice", &c);
+           likewise for furniture in case hero is levitating while blind */
+        } else if (ltyp == ICE || IS_FURNITURE(ltyp)) {
+            if (u.dz > 0) { /* down, which also means x,y == u.ux,u.uy */
+                force_decor(TRUE);
+                learn_it = TRUE;
+            }
+        }
+        /*
+         * Probing reveals undiscovered traps.
+         *
+         * FIXME?  This finds floor traps even when zapping up and
+         * ceiling traps even when zapping down.
+         */
+        if (ttmp) {
+            const char *ttmpname;
+            unsigned t_already_seen = ttmp->tseen;
+            boolean use_the, hallu = Hallucination != 0;
+
+            /* should probably be changed to use sense_trap(detect.c)
+               so that trap can temporarily be forced to be shown and
+               map browsing can take place before it reverts to being
+               covered by monster or object(s) */
+            ttmp->tseen = 1;
+            newsym(x, y);
+
+            if (!t_already_seen || hallu) {
+                ttmpname = trapname(ttmp->ttyp, FALSE);
+                use_the = !hallu ? (ttmp->ttyp == VIBRATING_SQUARE
+                                    && Invocation_lev(&u.uz))
+                                 : !rn2(4);
+                You("find %s%c",
+                    use_the ? the(ttmpname) : an(ttmpname),
+                    use_the ? '!' : '.');
+                learn_it = !hallu;
+            }
+        } /* t_at() */
+    } /* probing */
+
+    if (learn_it)
+        learnwand(obj);
+    return;
 }
 
 /*
@@ -3538,6 +3717,8 @@ bhit(
     boolean in_skip = FALSE, allow_skip = FALSE;
     boolean tethered_weapon = FALSE;
     int skiprange_start = 0, skiprange_end = 0, skipcount = 0;
+    struct obj *was_returning =
+        (iflags.returning_missile == obj) ? obj : (struct obj *) 0;
 
     if (weapon == KICKED_WEAPON) {
         /* object starts one square in front of player */
@@ -3564,7 +3745,7 @@ bhit(
         tmp_at(DISP_FLASH, obj_to_glyph(obj, rn2_on_display_rng));
 
     while (range-- > 0) {
-        coordxy x, y, dbx, dby;
+        coordxy x, y;
 
         gb.bhitpos.x += ddx;
         gb.bhitpos.y += ddy;
@@ -3610,65 +3791,15 @@ bhit(
                 show_transient_light((struct obj *) 0, x, y);
         }
 
-        dbx = x, dby = y;
-        if (weapon == ZAPPED_WAND && find_drawbridge(&dbx, &dby)) {
-            boolean learn_it = FALSE;
-
-            switch (obj->otyp) {
-            case WAN_OPENING:
-            case SPE_KNOCK:
-                /* dbwall: 'closed door' of raised drawbridge */
-                if (is_db_wall(x, y)) {
-                    if (cansee(dbx, dby) || cansee(x, y))
-                        learn_it = TRUE;
-                    open_drawbridge(dbx, dby);
-                }
-                break;
-            case WAN_LOCKING:
-            case SPE_WIZARD_LOCK:
-                /* drawbridge_down: span of lowered drawbridge */
-                if ((cansee(dbx, dby) || cansee(x, y))
-                    && levl[dbx][dby].typ == DRAWBRIDGE_DOWN)
-                    learn_it = TRUE;
-                close_drawbridge(dbx, dby);
-                break;
-            case WAN_STRIKING:
-            case SPE_FORCE_BOLT:
-                /* !drawbridge_up: not spot in front of raised bridge,
-                   so either span of lowered bridge or portcullis */
-                if (typ != DRAWBRIDGE_UP) {
-                    learn_it = TRUE;
-                    destroy_drawbridge(dbx, dby);
-                }
-                break;
-            }
-            if (learn_it)
-                learnwand(obj);
-        } else if (weapon == ZAPPED_WAND) {
-            boolean learn_it = FALSE;
-
-            if (obj->otyp == WAN_PROBING) {
-                if (!cansee(x, y)) {
-                    int oldglyph = glyph_at(x, y);
-
-                    show_map_spot(x, y, FALSE);
-                    if (oldglyph != glyph_at(x, y)) {
-                        /* TODO: need to give some message */
-                        learn_it = TRUE;
-                    }
-                }
-            }
-            if (learn_it)
-                learnwand(obj);
+        if (weapon == ZAPPED_WAND) {
+            /* cancellation/opening/locking/striking/probing */
+            zap_map(x, y, obj);
+            /* terrain might have changed (exposed secret door|corridor) */
+            typ = levl[x][y].typ;
         }
-
-        /* [shouldn't this trap handling be in zap_over_floor()?] */
-        if (weapon == ZAPPED_WAND)
-            maybe_explode_trap(t_at(x, y), obj);
 
         mtmp = m_at(x, y);
         ttmp = t_at(x, y);
-
         if (!mtmp && ttmp && (ttmp->ttyp == WEB)
             && (weapon == THROWN_WEAPON || weapon == KICKED_WEAPON)
             && !rn2(3)) {
@@ -3677,6 +3808,8 @@ bhit(
                 ttmp->tseen = TRUE;
                 newsym(x, y);
             }
+            if (was_returning)
+                iflags.returning_missile = (genericptr_t) 0;
             break;
         }
 
@@ -3850,7 +3983,8 @@ bhit(
         point_blank = FALSE; /* affects passing through iron bars */
     }
 
-    if (weapon != ZAPPED_WAND && weapon != INVIS_BEAM && !tethered_weapon)
+    if ((weapon != ZAPPED_WAND && weapon != INVIS_BEAM && !tethered_weapon)
+        || (was_returning && was_returning != iflags.returning_missile))
         tmp_at(DISP_END, 0);
 
     if (shopdoor)
@@ -3877,9 +4011,9 @@ boomhit(struct obj *obj, coordxy dx, coordxy dy)
     register int i, ct;
     int boom; /* showsym[] index  */
     struct monst *mtmp;
-    boolean counterclockwise = TRUE; /* right-handed throw */
+    boolean counterclockwise = URIGHTY; /* ULEFTY => clockwise */
 
-    /* counterclockwise traversal patterns:
+    /* counterclockwise traversal patterns, from @ to 1 then on through to 9
      *  ..........................54.................................
      *  ..................43.....6..3....765.........................
      *  ..........32.....5..2...7...2...8...4....87..................
@@ -4064,10 +4198,12 @@ zhitm(
             /* can still blind the monster */
         } else
             tmp = d(nd, 6);
-        if (spellcaster)
+        if (spellcaster && tmp)
             tmp = spell_damage_bonus(tmp);
         if (!resists_blnd(mon)
-            && !(type > 0 && engulfing_u(mon))) {
+            && !(type > 0 && engulfing_u(mon))
+            && nd > 2) {
+            /* sufficiently powerful lightning blinds monsters */
             register unsigned rnd_tmp = rnd(50);
             mon->mcansee = 0;
             if ((mon->mblinded + rnd_tmp) > 127)
@@ -4183,7 +4319,7 @@ zhitu(
         break;
     case ZT_DEATH:
         if (abstyp == ZT_BREATH(ZT_DEATH)) {
-            boolean disn_prot = u_adtyp_resistance_obj(AD_DISN) && rn2(100);
+            boolean disn_prot = inventory_resistance_check(AD_DISN);
 
             if (Disint_resistance) {
                 You("are not disintegrated.");
@@ -5012,29 +5148,27 @@ zap_over_floor(
         (void) create_gas_cloud(x, y, 1, 8);
         break;
 
+    case ZT_LIGHTNING:
+        /*FALLTHRU*/
     case ZT_ACID:
         if (lev->typ == IRONBARS) {
+            if (damgtype == ZT_LIGHTNING && rn2(10))
+                break;
             if ((lev->wall_info & W_NONDIGGABLE) != 0) {
                 if (see_it)
-                    Norep("The %s corrode somewhat but remain intact.",
+                    Norep("The %s %s somewhat but remain intact.",
+                          (damgtype == ZT_ACID) ? "corrode" : "melt",
                           defsyms[S_bars].explanation);
                 /* but nothing actually happens... */
             } else {
                 rangemod -= 3;
                 if (see_it)
                     Norep("The %s melt.", defsyms[S_bars].explanation);
+                dissolve_bars(x, y);
                 if (*in_rooms(x, y, SHOPBASE)) {
-                    /* in case we ever have a shop bounded by bars */
-                    lev->typ = ROOM, lev->flags = 0;
-                    if (see_it)
-                        newsym(x, y);
                     add_damage(x, y, (type >= 0) ? SHOP_BARS_COST : 0L);
                     if (type >= 0)
                         *shopdamage = TRUE;
-                } else {
-                    lev->typ = DOOR, lev->doormask = D_NODOOR;
-                    if (see_it)
-                        newsym(x, y);
                 }
             }
         }
@@ -5259,20 +5393,47 @@ adtyp_to_prop(int dmgtyp)
     return 0; /* prop_types start at 1 */
 }
 
-/* is hero wearing or wielding an object with resistance
-   to attack damage type */
-boolean
+/* Is hero wearing or wielding an object with resistance to attack
+   damage type? Returns the percentage protection that the object gives. */
+int
 u_adtyp_resistance_obj(int dmgtyp)
 {
     int prop = adtyp_to_prop(dmgtyp);
 
     if (!prop)
+        return 0;
+
+    /* Items that give an extrinsic resistance give 99% protection to
+       your items */
+    if ((u.uprops[prop].extrinsic & (W_ARMOR | W_ACCESSORY | W_WEP)) != 0)
+        return 99;
+
+    /* Dwarvish cloaks give a 90% protection to items against heat and cold */
+    if (uarmc && uarmc->otyp == DWARVISH_CLOAK
+        && (dmgtyp == AD_COLD || dmgtyp == AD_FIRE))
+        return 90;
+
+    return 0;
+}
+
+/* Rolls to see whether an object in inventory resists damage from the
+   given damage type, due to an equipped item protecting it. Use
+   u_adtyp_resistance_obj to discover whether objects are protected in
+   general (e.g. for enlightenment) and this function to actually do
+   the roll to see whether a specific object is protected.
+
+   This function doesn't check for other reasons why an object might
+   be protected; you will usually need to do an obj_resists() call
+   too. */
+boolean
+inventory_resistance_check(int dmgtyp)
+{
+    int prob = u_adtyp_resistance_obj(dmgtyp);
+
+    if (!prob)
         return FALSE;
 
-    if ((u.uprops[prop].extrinsic & (W_ARMOR | W_ACCESSORY | W_WEP)) != 0)
-        return TRUE;
-
-    return FALSE;
+    return rn2(100) < prob;
 }
 
 /* for enlightenment; currently only useful in wizard mode; cf from_what() */
@@ -5359,7 +5520,7 @@ destroy_one_item(struct obj *obj, int osym, int dmgtyp)
     quan = 0L;
 
     /* external worn item protects inventory? */
-    if (u_adtyp_resistance_obj(dmgtyp) && rn2(100))
+    if (inventory_resistance_check(dmgtyp))
         return;
 
     switch (dmgtyp) {
@@ -5504,7 +5665,7 @@ destroy_item(int osym, int dmgtyp)
     int i, deferral_indx = 0;
     /* 1+52+1: try to handle a full inventory; it doesn't matter if
       inventory actually has more, even if everything should be deferred */
-    unsigned short deferrals[1 + 52 + 1]; /* +1: gold, overflow */
+    unsigned short deferrals[invlet_gold + invlet_basic + invlet_overflow];
 
     (void) memset((genericptr_t) deferrals, 0, sizeof deferrals);
     /*
@@ -5834,7 +5995,7 @@ makewish(void)
 
     promptbuf[0] = '\0';
     nothing = cg.zeroobj; /* lint suppression; only its address matters */
-    if (Verbose(3, makewish))
+    if (flags.verbose)
         You("may wish for an object.");
  retry:
     Strcpy(promptbuf, "For what do you wish");
@@ -5852,8 +6013,9 @@ makewish(void)
     }
     /*
      *  Note: if they wished for and got a non-object successfully,
-     *  otmp == &zeroobj.  That includes an artifact which has been denied.
-     *  Wishing for "nothing" requires a separate value to remain distinct.
+     *  otmp == &hands_obj.  That includes an artifact which has been
+     *  denied. Wishing for "nothing" requires a separate value to remain
+     *  distinct.
      */
     strcpy(bufcpy, buf);
     otmp = readobjnam(buf, &nothing);
@@ -5870,7 +6032,7 @@ makewish(void)
            to retain wishless conduct */
         livelog_printf(LL_WISH, "declined to make a wish");
         return;
-    } else if (otmp == &cg.zeroobj) {
+    } else if (otmp == &hands_obj) {
         /* wizard mode terrain wish: skip livelogging, etc */
         return;
     }

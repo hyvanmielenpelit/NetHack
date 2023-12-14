@@ -1,4 +1,4 @@
-/* NetHack 3.7	mon.c	$NHDT-Date: 1693292534 2023/08/29 07:02:14 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.517 $ */
+/* NetHack 3.7	mon.c	$NHDT-Date: 1702023272 2023/12/08 08:14:32 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.532 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Derek S. Ray, 2015. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -30,6 +30,7 @@ static int pick_animal(void);
 static int pickvampshape(struct monst *);
 static boolean isspecmon(struct monst *);
 static boolean validspecmon(struct monst *, int);
+static int wiz_force_cham_form(struct monst *);
 static struct permonst *accept_newcham_form(struct monst *, int);
 static void kill_eggs(struct obj *);
 static void pacify_guard(struct monst *);
@@ -156,13 +157,13 @@ sanity_check_single_mon(
         if (ceiling_hider(mptr)
             /* normally !accessible would be overridable with passes_walls,
                but not for hiding on the ceiling */
-            && (!has_ceiling(&u.uz) ||
-                !(levl[mx][my].typ == POOL
-                  || levl[mx][my].typ == MOAT
-                  || levl[mx][my].typ == WATER
-                  || levl[mx][my].typ == LAVAPOOL
-                  || levl[mx][my].typ == LAVAWALL
-                  || accessible(mx, my))))
+            && (!has_ceiling(&u.uz)
+                || !(levl[mx][my].typ == POOL
+                     || levl[mx][my].typ == MOAT
+                     || levl[mx][my].typ == WATER
+                     || levl[mx][my].typ == LAVAPOOL
+                     || levl[mx][my].typ == LAVAWALL
+                     || accessible(mx, my))))
             impossible("ceiling hider hiding %s (%s)",
                        !has_ceiling(&u.uz) ? "without ceiling"
                                            : "in solid stone",
@@ -237,9 +238,9 @@ mon_sanity_check(void)
         } else if (mtmp->wormno) {
             sanity_check_worm(mtmp);
 
-        /* TODO: figure out which other bits shouldn't be set for 'fmon' */
-        } else if ((mtmp->mstate & (MON_DETACH | MON_MIGRATING | MON_LIMBO))
-                   != 0) {
+        /* some temp mstate bits can be expected for a mon on fmon, as part of
+           removing it, but DEADMONSTER check above should skip those. */
+        } else if (mon_offmap(mtmp)) {
             impossible("floor mon (%s) with mstate set to 0x%08lx",
                        fmt_ptr((genericptr_t) mtmp), mtmp->mstate);
         }
@@ -267,10 +268,9 @@ mon_sanity_check(void)
     for (mtmp = gm.migrating_mons; mtmp; mtmp = mtmp->nmon) {
         sanity_check_single_mon(mtmp, FALSE, "migr");
 
-        /* TODO: figure out which other bits could or shouldn't be set
-         * when migrating */
-        if ((mtmp->mstate & (MON_DETACH)) != 0
-            || (mtmp->mstate & (MON_MIGRATING | MON_LIMBO)) == 0)
+        if ((mtmp->mstate
+             & ~(MON_MIGRATING | MON_LIMBO | MON_ENDGAME_MIGR | MON_OFFMAP)) != 0L
+            || !(mtmp->mstate & MON_MIGRATING))
             impossible("migrating mon (%s) with mstate set to 0x%08lx",
                        fmt_ptr((genericptr_t) mtmp), mtmp->mstate);
     }
@@ -1260,7 +1260,7 @@ meatmetal(struct monst *mtmp)
                     /* call distant_name() for its side-effects even when
                        !verbose so won't be printed */
                     otmpname = distant_name(otmp, doname);
-                    if (Verbose(1, meatmetal1))
+                    if (flags.verbose)
                         pline("%s eats %s!", Monnam(mtmp), otmpname);
                 }
                 /* The object's rustproofing is gone now */
@@ -1269,7 +1269,7 @@ meatmetal(struct monst *mtmp)
                 if (vis) {
                     /* (see above; format even if it won't be printed) */
                     otmpname = distant_name(otmp, doname);
-                    if (Verbose(1, meatmetal2))
+                    if (flags.verbose)
                         pline("%s spits %s out in disgust!",
                               Monnam(mtmp), otmpname);
                 }
@@ -1277,10 +1277,10 @@ meatmetal(struct monst *mtmp)
                 if (cansee(mtmp->mx, mtmp->my)) {
                     /* (see above; format even if it won't be printed) */
                     otmpname = distant_name(otmp, doname);
-                    if (Verbose(1, meatmetal3))
+                    if (flags.verbose)
                         pline("%s eats %s!", Monnam(mtmp), otmpname);
                 } else {
-                    if (Verbose(1, meatmetal4)) {
+                    if (flags.verbose) {
                         Soundeffect(se_crunching_sound, 50);
                         You_hear("a crunching sound.");
                     }
@@ -1385,7 +1385,7 @@ meatobj(struct monst* mtmp) /* for gelatinous cubes */
             if (cansee(mtmp->mx, mtmp->my)) {
                 /* (see above; distant_name() sometimes has side-effects */
                 otmpname = distant_name(otmp, doname);
-                if (Verbose(2, meatobj1))
+                if (flags.verbose)
                     pline("%s eats %s!", Monnam(mtmp), otmpname);
                 /* give this one even if !verbose */
                 if (otmp->oclass == SCROLL_CLASS
@@ -1393,7 +1393,7 @@ meatobj(struct monst* mtmp) /* for gelatinous cubes */
                     pline("Yum%c", otmp->blessed ? '!' : '.');
             } else {
                 Soundeffect(se_slurping_sound, 30);
-                if (Verbose(2, meatobj2))
+                if (flags.verbose)
                     You_hear("a slurping sound.");
             }
             m_consume_obj(mtmp, otmp);
@@ -1409,9 +1409,9 @@ meatobj(struct monst* mtmp) /* for gelatinous cubes */
     }
 
     if (ecount > 0) {
-        if (cansee(mtmp->mx, mtmp->my) && Verbose(2, meatobj3) && buf[0])
+        if (cansee(mtmp->mx, mtmp->my) && flags.verbose && buf[0])
             pline1(buf);
-        else if (Verbose(2, meatobj4))
+        else if (flags.verbose)
             You_hear("%s slurping sound%s.",
                      (ecount == 1) ? "a" : "several", plur(ecount));
     }
@@ -1467,11 +1467,11 @@ meatcorpse(
                the result won't be printed */
             char *otmpname = distant_name(otmp, doname);
 
-            if (Verbose(2, meatcorpse1))
+            if (flags.verbose)
                 pline("%s eats %s!", Monnam(mtmp), otmpname);
         } else {
             Soundeffect(se_masticating_sound, 50);
-            if (Verbose(2, meatcorpse2))
+            if (flags.verbose)
                 You_hear("a masticating sound.");
         }
 
@@ -1605,7 +1605,7 @@ mpickgold(register struct monst* mtmp)
         obj_extract_self(gold);
         add_to_minv(mtmp, gold);
         if (cansee(mtmp->mx, mtmp->my)) {
-            if (Verbose(2, mpickgold) && !mtmp->isgd)
+            if (flags.verbose && !mtmp->isgd)
                 pline("%s picks up some %s.", Monnam(mtmp),
                       mat_idx == GOLD ? "gold" : "money");
             newsym(mtmp->mx, mtmp->my);
@@ -1665,7 +1665,7 @@ mpickstuff(struct monst *mtmp)
                    from floor and subsequent pickup by mtmp */
                 char *otmpname = distant_name(otmp, doname);
 
-                if (Verbose(2, mpickstuff))
+                if (flags.verbose)
                     pline("%s picks up %s.", Monnam(mtmp), otmpname);
             }
             obj_extract_self(otmp3);      /* remove from floor */
@@ -3286,7 +3286,15 @@ xkilled(
             otmp = mkobj(RANDOM_CLASS, TRUE);
             /* don't create large objects from small monsters */
             otyp = otmp->otyp;
-            if (mdat->msize < MZ_HUMAN && otyp != FIGURINE
+            if (otmp->oclass == FOOD_CLASS && !(mdat->mflags2 & M2_COLLECT)
+                && !otmp->oartifact) {
+                /* don't drop newly created permafood from kills, unless
+                   the monster collects food; it creates too much nutrition
+                   in the late game and encourages grinding in the early
+                   game; oartifact check is paranoia and will be redundant
+                   until an artifact comestible is added */
+                delobj(otmp);
+            } else if (mdat->msize < MZ_HUMAN && otyp != FIGURINE
                 /* oc_big is also oc_bimanual and oc_bulky */
                 && (otmp->owt > 30 || objects[otyp].oc_big)) {
                 if (otmp->oartifact) /* un-create */
@@ -3856,7 +3864,7 @@ peacefuls_respond(struct monst *mtmp)
                         alreadyfleeing = (mon->mflee || mon->mfleetim);
                         monflee(mon, rn2(50) + 25, TRUE, !exclaimed);
                         if (exclaimed) {
-                            if (Verbose(2, setmangry) && !alreadyfleeing) {
+                            if (flags.verbose && !alreadyfleeing) {
                                 Strcat(buf, " and then turns to flee.");
                                 needpunct = FALSE;
                             }
@@ -4033,6 +4041,7 @@ wake_nearto(coordxy x, coordxy y, int distance)
             }
         }
     }
+    disturb_buried_zombies(x, y);
 }
 
 /* NOTE: we must check for mimicry before calling this routine */
@@ -4092,8 +4101,8 @@ normal_shape(struct monst *mon)
     }
 }
 
-/* iterate all monsters on the level, even dead ones, calling func
-   for each monster. if func returns TRUE, stop iterating.
+/* iterate all monsters on the level, even dead or off-map ones,
+   calling func for each monster. if func returns TRUE, stop iterating.
    safe for list deletions and insertions, and guarantees
    calling func once per monster in the list. */
 void
@@ -4107,7 +4116,7 @@ iter_mons_safe(boolean (*func)(struct monst *))
     for (mtmp = fmon; mtmp; mtmp = mtmp->nmon)
         nmons++;
 
-    monarr = (struct monst **)alloc(nmons * sizeof(struct monst *));
+    monarr = (struct monst **) alloc(nmons * sizeof(struct monst *));
     for (mtmp = fmon; mtmp; mtmp = mtmp->nmon)
         monarr[i++] = mtmp;
 
@@ -4125,10 +4134,11 @@ iter_mons_safe(boolean (*func)(struct monst *))
 void
 iter_mons(void (*func)(struct monst *))
 {
-    struct monst *mtmp;
+    struct monst *mtmp, *mtmp2;
 
-    for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-        if (DEADMONSTER(mtmp))
+    for (mtmp = fmon; mtmp; mtmp = mtmp2) {
+        mtmp2 = mtmp->nmon;
+        if (DEADMONSTER(mtmp) || mon_offmap(mtmp))
             continue;
         func(mtmp);
     }
@@ -4140,10 +4150,11 @@ iter_mons(void (*func)(struct monst *))
 struct monst *
 get_iter_mons(boolean (*func)(struct monst *))
 {
-    struct monst *mtmp;
+    struct monst *mtmp, *mtmp2;
 
-    for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-        if (DEADMONSTER(mtmp))
+    for (mtmp = fmon; mtmp; mtmp = mtmp2) {
+        mtmp2 = mtmp->nmon;
+        if (DEADMONSTER(mtmp) || mon_offmap(mtmp))
             continue;
         if (func(mtmp))
             return mtmp;
@@ -4158,10 +4169,11 @@ struct monst *
 get_iter_mons_xy(boolean (*func)(struct monst *, coordxy, coordxy),
                 coordxy x, coordxy y)
 {
-    struct monst *mtmp;
+    struct monst *mtmp, *mtmp2;
 
-    for (mtmp = fmon; mtmp; mtmp = mtmp->nmon) {
-        if (DEADMONSTER(mtmp))
+    for (mtmp = fmon; mtmp; mtmp = mtmp2) {
+        mtmp2 = mtmp->nmon;
+        if (DEADMONSTER(mtmp) || mon_offmap(mtmp))
             continue;
         if (func(mtmp, x, y))
             return mtmp;
@@ -4408,7 +4420,7 @@ pick_animal(void)
     /* rogue level should use monsters represented by uppercase letters
        only, but since chameleons aren't generated there (not uppercase!)
        we don't perform a lot of retries */
-    if (Is_rogue_level(&u.uz) && !isupper((uchar) mons[res].mlet))
+    if (Is_rogue_level(&u.uz) && !isupper(monsym(&mons[res])))
         res = ga.animal_list[rn2(ga.animal_list_count)];
     return res;
 }
@@ -4612,6 +4624,85 @@ validvamp(struct monst* mon, int* mndx_p, int monclass)
     return (boolean) (*mndx_p != NON_PM);
 }
 
+static int
+wiz_force_cham_form(struct monst *mon)
+{
+    char pprompt[BUFSZ], parttwo[QBUFSZ], buf[BUFSZ], prevbuf[BUFSZ];
+    int monclass, len, tryct, mndx = NON_PM;
+
+    /* construct prompt in pieces */
+    Sprintf(pprompt, "Change %s", noit_mon_nam(mon));
+    Sprintf(parttwo, " @ %s into what?",
+            coord_desc((int) mon->mx, (int) mon->my, buf,
+                       (iflags.getpos_coords != GPCOORDS_NONE)
+                       ? iflags.getpos_coords : GPCOORDS_MAP));
+    /* combine the two parts, not exceeding QBUFSZ-1 in overall length;
+       if combined length is too long it has to be due to monster's
+       name so we'll chop enough of that off to fit the second part */
+    if ((len = (int) strlen(pprompt) + (int) strlen(parttwo)) >= QBUFSZ)
+        /* strlen(parttwo) is less than QBUFSZ/2 so strlen(pprompt) is
+           more than QBUFSZ/2 and excess amount being truncated can't
+           exceed pprompt's length and back up to before &pprompt[0]) */
+        *(eos(pprompt) - (len - (QBUFSZ - 1))) = '\0';
+    Strcat(pprompt, parttwo);
+
+    buf[0] = prevbuf[0] = '\0'; /* clear buffer for EDIT_GETLIN */
+#define TRYLIMIT 5
+    tryct = TRYLIMIT;
+    do {
+        if (tryct == TRYLIMIT - 1) { /* first retry */
+            /* change "into what?" to "into what kind of monster?" */
+            if (strlen(pprompt) + sizeof " kind of monster" - 1 < QBUFSZ)
+                Strcpy(eos(pprompt) - 1, " kind of monster?");
+        }
+#undef TRYLIMIT
+        monclass = 0;
+        getlin(pprompt, buf);
+        mungspaces(buf);
+        /* for ESC, take form selected above (might be NON_PM) */
+        if (*buf == '\033')
+            break;
+        /* for "*", use NON_PM to pick an arbitrary shape below */
+        if (!strcmp(buf, "*") || !strcmpi(buf, "random")) {
+            mndx = NON_PM;
+            break;
+        }
+        mndx = name_to_mon(buf, (int *) 0);
+        if (mndx == NON_PM) {
+            /* didn't get a type, so check whether it's a class
+               (single letter or text match with def_monsyms[]) */
+            monclass = name_to_monclass(buf, &mndx);
+            if (monclass && mndx == NON_PM)
+                mndx = mkclass_poly(monclass);
+        }
+        if (mndx >= LOW_PM) {
+            /* got a specific type of monster; use it if we can */
+            if (validvamp(mon, &mndx, monclass))
+                break;
+            /* can't; revert to random in case we exhaust tryct */
+            mndx = NON_PM;
+        }
+
+        pline("It can't become that.");
+#ifdef EDIT_GETLIN
+        /* EDIT_GETLIN preloads the input buffer with the previous
+           response but we shouldn't just keep repeating that if player
+           leaves it unchanged; affects retry for empty input too */
+        if (!strcmp(buf, prevbuf))
+            Strcpy(buf, "random");
+        Strcpy(prevbuf, buf);
+#else
+        nhUse(prevbuf);
+#endif
+    } while (--tryct > 0);
+
+    if (!tryct)
+        pline1(thats_enough_tries);
+    if (is_vampshifter(mon) && !validvamp(mon, &mndx, monclass))
+        mndx = pickvampshape(mon); /* don't resort to arbitrary */
+    return mndx;
+}
+
 int
 select_newcham_form(struct monst* mon)
 {
@@ -4665,81 +4756,8 @@ select_newcham_form(struct monst* mon)
     }
 
     /* for debugging: allow control of polymorphed monster */
-    if (wizard && iflags.mon_polycontrol) {
-        char pprompt[BUFSZ], parttwo[QBUFSZ], buf[BUFSZ], prevbuf[BUFSZ];
-        int monclass, len;
-
-        /* construct prompt in pieces */
-        Sprintf(pprompt, "Change %s", noit_mon_nam(mon));
-        Sprintf(parttwo, " @ %s into what?",
-                coord_desc((int) mon->mx, (int) mon->my, buf,
-                           (iflags.getpos_coords != GPCOORDS_NONE)
-                              ? iflags.getpos_coords : GPCOORDS_MAP));
-        /* combine the two parts, not exceeding QBUFSZ-1 in overall length;
-           if combined length is too long it has to be due to monster's
-           name so we'll chop enough of that off to fit the second part */
-        if ((len = (int) strlen(pprompt) + (int) strlen(parttwo)) >= QBUFSZ)
-            /* strlen(parttwo) is less than QBUFSZ/2 so strlen(pprompt) is
-               more than QBUFSZ/2 and excess amount being truncated can't
-               exceed pprompt's length and back up to before &pprompt[0]) */
-            *(eos(pprompt) - (len - (QBUFSZ - 1))) = '\0';
-        Strcat(pprompt, parttwo);
-
-        buf[0] = prevbuf[0] = '\0'; /* clear buffer for EDIT_GETLIN */
-#define TRYLIMIT 5
-        tryct = TRYLIMIT;
-        do {
-            if (tryct == TRYLIMIT - 1) { /* first retry */
-                /* change "into what?" to "into what kind of monster?" */
-                if (strlen(pprompt) + sizeof " kind of monster" - 1 < QBUFSZ)
-                    Strcpy(eos(pprompt) - 1, " kind of monster?");
-            }
-#undef TRYLIMIT
-            monclass = 0;
-            getlin(pprompt, buf);
-            mungspaces(buf);
-            /* for ESC, take form selected above (might be NON_PM) */
-            if (*buf == '\033')
-                break;
-            /* for "*", use NON_PM to pick an arbitrary shape below */
-            if (!strcmp(buf, "*") || !strcmpi(buf, "random")) {
-                mndx = NON_PM;
-                break;
-            }
-            mndx = name_to_mon(buf, (int *) 0);
-            if (mndx == NON_PM) {
-                /* didn't get a type, so check whether it's a class
-                   (single letter or text match with def_monsyms[]) */
-                monclass = name_to_monclass(buf, &mndx);
-                if (monclass && mndx == NON_PM)
-                    mndx = mkclass_poly(monclass);
-            }
-            if (mndx >= LOW_PM) {
-                /* got a specific type of monster; use it if we can */
-                if (validvamp(mon, &mndx, monclass))
-                    break;
-                /* can't; revert to random in case we exhaust tryct */
-                mndx = NON_PM;
-            }
-
-            pline("It can't become that.");
-#ifdef EDIT_GETLIN
-            /* EDIT_GETLIN preloads the input buffer with the previous
-               response but we shouldn't just keep repeating that if player
-               leaves it unchanged; affects retry for empty input too */
-            if (!strcmp(buf, prevbuf))
-                Strcpy(buf, "random");
-            Strcpy(prevbuf, buf);
-#else
-            nhUse(prevbuf);
-#endif
-        } while (--tryct > 0);
-
-        if (!tryct)
-            pline1(thats_enough_tries);
-        if (is_vampshifter(mon) && !validvamp(mon, &mndx, monclass))
-            mndx = pickvampshape(mon); /* don't resort to arbitrary */
-    }
+    if (wizard && iflags.mon_polycontrol)
+        mndx = wiz_force_cham_form(mon);
 
     /* if no form was specified above, pick one at random now */
     if (mndx == NON_PM) {
@@ -4749,7 +4767,7 @@ select_newcham_form(struct monst* mon)
         } while (--tryct > 0 && !validspecmon(mon, mndx)
                  /* try harder to select uppercase monster on rogue level */
                  && (tryct > 40 && Is_rogue_level(&u.uz)
-                     && !isupper((uchar) mons[mndx].mlet)));
+                     && !isupper(monsym(&mons[mndx]))));
     }
     return mndx;
 }
@@ -4854,7 +4872,7 @@ newcham(
             /* for the first several tries we require upper-case on
                the rogue level (after that, we take whatever we get) */
             if (tryct > 15 && Is_rogue_level(&u.uz)
-                && mdat && !isupper((uchar) mdat->mlet))
+                && mdat && !isupper(monsym(mdat)))
                 mdat = 0;
             if (mdat)
                 break;
@@ -5036,6 +5054,8 @@ newcham(
             }
         }
     }
+    if (mtmp == u.usteed)
+        poly_steed(mtmp, olddata);
 
     return 1;
 }

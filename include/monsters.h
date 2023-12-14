@@ -1,4 +1,4 @@
-/* NetHack 3.7	monsters.h	$NHDT-Date: 1691877846 2023/08/12 22:04:06 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.110 $ */
+/* NetHack 3.7	monsters.h	$NHDT-Date: 1700725870 2023/11/23 07:51:10 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.113 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Michael Allison, 2006. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -33,7 +33,7 @@
  *      sounds made (MS_* defines), physical size (MZ_* defines),
  *      resistances, resistances conferred (both MR_* defines),
  *      3 * flag bitmaps (M1_*, M2_*, and M3_* defines respectively),
- *      difficulty, symbol color (C(x) macro).
+ *      difficulty, symbol color.
  *
  *      The difficulty was generated in separate array monstr[] with
  *      values calculated by makedefs, but has been moved into mons[]
@@ -235,13 +235,13 @@
           NO_ATTK),
         SIZ(500, 250, MS_BARK, MZ_MEDIUM), 0, 0,
         M1_ANIMAL | M1_NOHANDS | M1_CARNIVORE, M2_HOSTILE, M3_INFRAVISIBLE,
-        6, CLR_BROWN, WOLF),
+        6, CLR_GRAY, WOLF),
     MON("werewolf", S_DOG, LVL(5, 12, 4, 20, -7), (G_NOGEN | G_NOCORPSE),
         A(ATTK(AT_BITE, AD_WERE, 2, 6), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
           NO_ATTK),
         SIZ(500, 250, MS_BARK, MZ_MEDIUM), MR_POISON, 0,
         M1_NOHANDS | M1_POIS | M1_REGEN | M1_CARNIVORE,
-        M2_NOPOLY | M2_WERE | M2_HOSTILE, M3_INFRAVISIBLE, 7, CLR_BROWN,
+        M2_NOPOLY | M2_WERE | M2_HOSTILE, M3_INFRAVISIBLE, 7, CLR_GRAY,
         WEREWOLF),
     MON("winter wolf cub", S_DOG, LVL(5, 12, 4, 0, -5),
         (G_NOHELL | G_GENO | G_SGROUP | 2),
@@ -255,7 +255,7 @@
           NO_ATTK),
         SIZ(850, 350, MS_BARK, MZ_MEDIUM), 0, 0,
         M1_ANIMAL | M1_NOHANDS | M1_CARNIVORE, M2_HOSTILE, M3_INFRAVISIBLE,
-        8, CLR_BROWN, WARG),
+        8, CLR_BLACK, WARG),
     MON("winter wolf", S_DOG, LVL(7, 12, 4, 20, 0), (G_NOHELL | G_GENO | 1),
         A(ATTK(AT_BITE, AD_PHYS, 2, 6), ATTK(AT_BREA, AD_COLD, 2, 6), NO_ATTK,
           NO_ATTK, NO_ATTK, NO_ATTK),
@@ -454,7 +454,7 @@
         SIZ(1450, 400, MS_HISS, MZ_HUMAN), 0, 0,
         M1_HUMANOID | M1_FLY | M1_SEE_INVIS | M1_OMNIVORE,
         M2_HOSTILE | M2_NASTY | M2_GREEDY | M2_JEWELS | M2_COLLECT,
-        M3_INFRAVISIBLE | M3_INFRAVISION, 13, CLR_MAGENTA, MIND_FLAYER),
+        M3_INFRAVISIBLE | M3_INFRAVISION, 13, CLR_BRIGHT_MAGENTA, MIND_FLAYER),
     MON("master mind flayer", S_HUMANOID, LVL(13, 12, 0, 90, -8),
         (G_GENO | 1),
         A(ATTK(AT_WEAP, AD_PHYS, 1, 8), ATTK(AT_TENT, AD_DRIN, 2, 1),
@@ -463,7 +463,7 @@
         SIZ(1450, 400, MS_HISS, MZ_HUMAN), 0, 0,
         M1_HUMANOID | M1_FLY | M1_SEE_INVIS | M1_OMNIVORE,
         M2_HOSTILE | M2_NASTY | M2_GREEDY | M2_JEWELS | M2_COLLECT,
-        M3_INFRAVISIBLE | M3_INFRAVISION, 19, CLR_MAGENTA,
+        M3_INFRAVISIBLE | M3_INFRAVISION, 19, CLR_BRIGHT_MAGENTA,
         MASTER_MIND_FLAYER),
     /*
      * imps & other minor demons/devils
@@ -2408,7 +2408,7 @@
             | M1_TPORT | M1_TPORT_CNTRL | M1_OMNIVORE,
         M2_NOPOLY | M2_HUMAN | M2_HOSTILE | M2_STRONG | M2_NASTY | M2_PRINCE
             | M2_MALE | M2_MAGIC,
-        M3_COVETOUS | M3_WAITFORU | M3_INFRAVISIBLE, 34, HI_LORD,
+        M3_COVETOUS | M3_WAITFORU | M3_INFRAVISIBLE, 34, HI_OVERLORD,
         WIZARD_OF_YENDOR),
     MON("Croesus", S_HUMAN, LVL(20, 15, 0, 40, 15), (G_UNIQ | G_NOGEN),
         A(ATTK(AT_WEAP, AD_PHYS, 4, 10), NO_ATTK, NO_ATTK, NO_ATTK, NO_ATTK,
@@ -2519,14 +2519,14 @@
           ATTK(AT_BITE, AD_PHYS, 1, 6), NO_ATTK),
         SIZ(WT_HUMAN, 400, MS_SILENT, MZ_LARGE), MR_FIRE | MR_POISON, 0,
         M1_POIS, M2_DEMON | M2_STALK | M2_HOSTILE | M2_NASTY,
-        M3_INFRAVISIBLE | M3_INFRAVISION, 11, CLR_RED, VROCK),
+        M3_INFRAVISIBLE | M3_INFRAVISION, 11, CLR_GREEN, VROCK),
     MON("hezrou", S_DEMON, LVL(9, 6, -2, 55, -10),
         (G_HELL | G_NOCORPSE | G_SGROUP | 2),
         A(ATTK(AT_CLAW, AD_PHYS, 1, 3), ATTK(AT_CLAW, AD_PHYS, 1, 3),
           ATTK(AT_BITE, AD_PHYS, 4, 4), NO_ATTK, NO_ATTK, NO_ATTK),
         SIZ(WT_HUMAN, 400, MS_SILENT, MZ_LARGE), MR_FIRE | MR_POISON, 0,
         M1_HUMANOID | M1_POIS, M2_DEMON | M2_STALK | M2_HOSTILE | M2_NASTY,
-        M3_INFRAVISIBLE | M3_INFRAVISION, 12, CLR_RED, HEZROU),
+        M3_INFRAVISIBLE | M3_INFRAVISION, 12, CLR_GREEN, HEZROU),
     MON("bone devil", S_DEMON, LVL(9, 15, -1, 40, -9),
         (G_HELL | G_NOCORPSE | G_SGROUP | 2),
         A(ATTK(AT_WEAP, AD_PHYS, 3, 4), ATTK(AT_STNG, AD_DRST, 2, 4), NO_ATTK,
@@ -2672,7 +2672,7 @@
         MR_FIRE | MR_COLD | MR_ELEC | MR_SLEEP | MR_POISON | MR_STONE, 0,
         M1_FLY | M1_HUMANOID | M1_REGEN | M1_SEE_INVIS | M1_TPORT_CNTRL,
         M2_NOPOLY | M2_STALK | M2_HOSTILE | M2_PNAME | M2_STRONG | M2_NASTY,
-        M3_INFRAVISIBLE | M3_INFRAVISION | M3_DISPLACES, 34, HI_LORD,
+        M3_INFRAVISIBLE | M3_INFRAVISION | M3_DISPLACES, 34, HI_OVERLORD,
         DEATH),
     MON("Pestilence", S_DEMON, LVL(30, 12, -5, 100, 0), (G_UNIQ | G_NOGEN),
         A(ATTK(AT_TUCH, AD_PEST, 8, 8), ATTK(AT_TUCH, AD_PEST, 8, 8), NO_ATTK,
@@ -2681,7 +2681,7 @@
         MR_FIRE | MR_COLD | MR_ELEC | MR_SLEEP | MR_POISON | MR_STONE, 0,
         M1_FLY | M1_HUMANOID | M1_REGEN | M1_SEE_INVIS | M1_TPORT_CNTRL,
         M2_NOPOLY | M2_STALK | M2_HOSTILE | M2_PNAME | M2_STRONG | M2_NASTY,
-        M3_INFRAVISIBLE | M3_INFRAVISION | M3_DISPLACES, 34, HI_LORD,
+        M3_INFRAVISIBLE | M3_INFRAVISION | M3_DISPLACES, 34, HI_OVERLORD,
         PESTILENCE),
     MON("Famine", S_DEMON, LVL(30, 12, -5, 100, 0), (G_UNIQ | G_NOGEN),
         A(ATTK(AT_TUCH, AD_FAMN, 8, 8), ATTK(AT_TUCH, AD_FAMN, 8, 8), NO_ATTK,
@@ -2690,7 +2690,7 @@
         MR_FIRE | MR_COLD | MR_ELEC | MR_SLEEP | MR_POISON | MR_STONE, 0,
         M1_FLY | M1_HUMANOID | M1_REGEN | M1_SEE_INVIS | M1_TPORT_CNTRL,
         M2_NOPOLY | M2_STALK | M2_HOSTILE | M2_PNAME | M2_STRONG | M2_NASTY,
-        M3_INFRAVISIBLE | M3_INFRAVISION | M3_DISPLACES, 34, HI_LORD,
+        M3_INFRAVISIBLE | M3_INFRAVISION | M3_DISPLACES, 34, HI_OVERLORD,
         FAMINE),
     /* other demons
      */

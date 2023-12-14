@@ -643,7 +643,7 @@ getpos_menu(coord *ccp, int gloc)
     int i, pick_cnt;
     menu_item *picks = (menu_item *) 0;
     char tmpbuf[BUFSZ];
-    int clr = 0;
+    int clr = NO_COLOR;
 
     gather_locs(&garr, &gcount, gloc);
 
@@ -821,7 +821,7 @@ getpos(coord *ccp, boolean force, const char *goal)
 
     if (!goal)
         goal = "desired location";
-    if (Verbose(0, getpos1)) {
+    if (flags.verbose) {
         pline("(For instructions type a '%s')",
               visctrl(gc.Cmd.spkeys[NHKF_GETPOS_HELP]));
         msg_given = TRUE;
@@ -965,7 +965,7 @@ getpos(coord *ccp, boolean force, const char *goal)
         } else if (c == gc.Cmd.spkeys[NHKF_GETPOS_AUTODESC]) {
             iflags.autodescribe = !iflags.autodescribe;
             pline("Automatic description %sis %s.",
-                  Verbose(0, getpos2) ? "of features under cursor " : "",
+                  flags.verbose ? "of features under cursor " : "",
                   iflags.autodescribe ? "on" : "off");
             if (!iflags.autodescribe)
                 show_goal_msg = TRUE;
@@ -1335,6 +1335,7 @@ do_mgivenname(void)
     coord cc;
     int cx, cy;
     struct monst *mtmp = 0;
+    boolean do_swallow = FALSE;
 
     if (Hallucination) {
         You("would never recognize it anyway.");
@@ -1358,12 +1359,23 @@ do_mgivenname(void)
     } else
         mtmp = m_at(cx, cy);
 
-    if (!mtmp
+    /* Allow you to name the monster that has swallowed you */
+    if (!mtmp && u.uswallow) {
+        int glyph = glyph_at(cx, cy);
+
+        if (glyph_is_swallow(glyph)) {
+            mtmp = u.ustuck;
+            do_swallow = TRUE;
+        }
+    }
+
+    if (!do_swallow && (!mtmp
         || (!sensemon(mtmp)
             && (!(cansee(cx, cy) || see_with_infrared(mtmp))
                 || mtmp->mundetected || M_AP_TYPE(mtmp) == M_AP_FURNITURE
                 || M_AP_TYPE(mtmp) == M_AP_OBJECT
-                || (mtmp->minvis && !See_invisible)))) {
+                || (mtmp->minvis && !See_invisible))))) {
+
         pline("I see no monster there.");
         return;
     }
@@ -1623,7 +1635,7 @@ docallcmd(void)
     char ch = 0;
     /* if player wants a,b,c instead of i,o when looting, do that here too */
     boolean abc = flags.lootabc;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     if ((cmdq = cmdq_pop()) != 0) {
         cq = *cmdq;
@@ -1887,7 +1899,7 @@ static const char *const ghostnames[] = {
 const char *
 rndghostname(void)
 {
-    return rn2(7) ? ghostnames[rn2(SIZE(ghostnames))]
+    return rn2(7) ? ROLL_FROM(ghostnames)
                   : (const char *) gp.plname;
 }
 
@@ -1955,6 +1967,16 @@ x_monnam(
     if (article == ARTICLE_YOUR && !mtmp->mtame)
         article = ARTICLE_THE;
 
+    if (u.uswallow && mtmp == u.ustuck) {
+        /*
+         * This monster has become important, for the moment anyway.
+         * As the hero's consumer, it is worthy of ARTICLE_THE.
+         * Also, suppress invisible as that particular characteristic
+         * is unimportant now and you can see it's interior anyway.
+         */
+        article = ARTICLE_THE;
+        suppress |= SUPPRESS_INVISIBLE;
+    }
     do_hallu = Hallucination && !(suppress & SUPPRESS_HALLUCINATION);
     do_invis = mtmp->minvis && !(suppress & SUPPRESS_INVISIBLE);
     do_it = !canspotmon(mtmp) && article != ARTICLE_YOUR
@@ -2613,7 +2635,7 @@ rndorcname(char *s)
         for (i = 0; i < iend; ++i) {
             vstart = 1 - vstart;                /* 0 -> 1, 1 -> 0 */
             Sprintf(eos(s), "%s%s", (i > 0 && !rn2(30)) ? "-" : "",
-                    vstart ? v[rn2(SIZE(v))] : snd[rn2(SIZE(snd))]);
+                    vstart ? ROLL_FROM(v) : ROLL_FROM(snd));
         }
     }
     return s;

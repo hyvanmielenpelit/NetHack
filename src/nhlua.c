@@ -1,4 +1,4 @@
-/* NetHack 3.7	nhlua.c	$NHDT-Date: 1695159626 2023/09/19 21:40:26 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.115 $ */
+/* NetHack 3.7	nhlua.c	$NHDT-Date: 1701978168 2023/12/07 19:42:48 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.120 $ */
 /*      Copyright (c) 2018 by Pasi Kallinen */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -239,7 +239,7 @@ get_table_mapchr_opt(lua_State *L, const char *name, schar defval)
     xint8 typ;
 
     ter = get_table_str_opt(L, name, emptystr);
-    if (name && ter && *ter) {
+    if (ter && *ter) {
         typ = (xint8) check_mapchr(ter);
         if (typ == INVALID_TYPE)
             nhl_error(L, "Erroneous map char");
@@ -703,7 +703,7 @@ nhl_menu(lua_State *L)
     winid tmpwin;
     anything any;
     menu_item *picks = (menu_item *) 0;
-    int clr = 0;
+    int clr = NO_COLOR;
 
     if (argc < 2 || argc > 4) {
         nhl_error(L, "Wrong args");
@@ -788,7 +788,6 @@ nhl_text(lua_State *L)
     if (argc > 0) {
         menu_item *picks = (menu_item *) 0;
         winid tmpwin;
-        anything any = cg.zeroany;
 
         tmpwin = create_nhwindow(NHW_MENU);
         start_menu(tmpwin, MENU_BEHAVE_STANDARD);
@@ -811,8 +810,7 @@ nhl_text(lua_State *L)
                 while ((ptr > str) && !(*ptr == ' ' || *ptr == '\n'))
                     ptr--;
                 *ptr = '\0';
-                add_menu(tmpwin, &nul_glyphinfo, &any, 0, 0, ATR_NONE, 0,
-                         str, MENU_ITEMFLAGS_NONE);
+                add_menu_str(tmpwin, str);
                 str = ptr + 1;
             } while (*str && str <= lstr);
             lua_pop(L, 1);
@@ -1337,7 +1335,7 @@ nhl_debug_flags(lua_State *L)
     /* disable monster generation */
     val = get_table_boolean_opt(L, "mongen", -1);
     if (val != -1) {
-        iflags.debug_mongen = !(boolean)val; /* value in lua is negated */
+        iflags.debug_mongen = !(boolean) val; /* value in lua is negated */
         if (iflags.debug_mongen) {
             register struct monst *mtmp, *mtmp2;
 
@@ -1353,13 +1351,13 @@ nhl_debug_flags(lua_State *L)
     /* prevent hunger */
     val = get_table_boolean_opt(L, "hunger", -1);
     if (val != -1) {
-        iflags.debug_hunger = !(boolean)val; /* value in lua is negated */
+        iflags.debug_hunger = !(boolean) val; /* value in lua is negated */
     }
 
     /* allow overwriting stairs */
     val = get_table_boolean_opt(L, "overwrite_stairs", -1);
     if (val != -1) {
-        iflags.debug_overwrite_stairs = (boolean)val;
+        iflags.debug_overwrite_stairs = (boolean) val;
     }
 
     return 0;
@@ -1957,7 +1955,7 @@ nhl_loadlua(lua_State *L, const char *fname)
          * in use, and fseek(SEEK_END) only yields an upper bound on
          * the actual amount of data in that situation.]
          */
-        if ((cnt = dlb_fread(bufin, 1, min((int)buflen, LOADCHUNKSIZE), fh)) < 0L)
+        if ((cnt = dlb_fread(bufin, 1, min((int) buflen, LOADCHUNKSIZE), fh)) < 0L)
             break;
         buflen -= cnt; /* set up for next iteration, if any */
         if (cnt == 0L) {
@@ -2386,7 +2384,7 @@ opencheckpat(lua_State *L, const char *ename, int param)
     lua_pushstring(luapat, string);                              /* -0,+1 */
 
 
-    (void)lua_getfield(L, -1, ename);       /* pattern              -0,+1 */
+    (void) lua_getfield(L, -1, ename);       /* pattern              -0,+1 */
     lua_pop(L, 1);                                               /* -1,+0 */
     string = lua_tolstring(L, -1, NULL);                         /* -0,+0 */
     lua_pushstring(luapat, string);                              /* -0,+1 */
@@ -2513,7 +2511,7 @@ hook_open(lua_State *L)
          * doesn't have to work, but POSIX says it does.  So it
          * _should_ work everywhere but all we can do without messing
          * around inside Lua is to try to keep the compiler quiet. */
-        io_open = (int (*)(lua_State *))lua_topointer(L, -1);
+        io_open = (int (*)(lua_State *)) lua_topointer(L, -1);
         lua_pushcfunction(L, hooked_open);
         lua_setfield(L, -1, "open");
         rv = TRUE;
@@ -2675,7 +2673,8 @@ nhl_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
     }
 
     if (nsize == 0) {
-        free(ptr);
+        if (ptr != NULL)
+            free(ptr);
         return NULL;
     }
 

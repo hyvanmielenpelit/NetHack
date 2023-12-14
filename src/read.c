@@ -360,7 +360,7 @@ doread(void)
 
     /* outrumor has its own blindness check */
     if (otyp == FORTUNE_COOKIE) {
-        if (Verbose(3, doread1))
+        if (flags.verbose)
             You("break up the cookie and throw away the pieces.");
         outrumor(bcsign(scroll), BY_COOKIE);
         if (!Blind)
@@ -387,8 +387,7 @@ doread(void)
             return ECMD_OK;
         }
         if (otyp == HAWAIIAN_SHIRT) {
-            pline("%s features %s.",
-                  Verbose(3, doread2) ? "The design" : "It",
+            pline("%s features %s.", flags.verbose ? "The design" : "It",
                   hawaiian_design(scroll, buf));
             return ECMD_TIME;
         }
@@ -401,7 +400,7 @@ doread(void)
         mesg = (otyp == T_SHIRT) ? tshirt_text(scroll, buf)
                                  : apron_text(scroll, buf);
         endpunct = "";
-        if (Verbose(3, doread3)) {
+        if (flags.verbose) {
             int ln = (int) strlen(mesg);
 
             /* we will be displaying a sentence; need ending punctuation */
@@ -465,7 +464,7 @@ doread(void)
         if (Blind) {
             You("feel the embossed numbers:");
         } else {
-            if (Verbose(3, doread4))
+            if (flags.verbose)
                 pline("It reads:");
             pline("\"%s\"",
                   scroll->oartifact
@@ -480,7 +479,7 @@ doread(void)
               ((int) scroll->o_id % 10),
               (!((int) scroll->o_id % 3)),
               (((int) scroll->o_id * 7) % 10),
-              (Verbose(3, doread5) || Blind) ? "." : "");
+              (flags.verbose || Blind) ? "." : "");
         if (!u.uconduct.literate++)
             livelog_printf(LL_CONDUCT,
                            "became literate by reading a credit card");
@@ -501,7 +500,7 @@ doread(void)
             You_cant(find_any_braille);
             return ECMD_OK;
         }
-        if (Verbose(3, doread6))
+        if (flags.verbose)
             pline("It reads:");
         Sprintf(buf, "%s", pmname(pm, NEUTRAL));
         pline("\"Magic Marker(TM) %s Red Ink Marker Pen.  Water Soluble.\"",
@@ -514,7 +513,7 @@ doread(void)
     } else if (scroll->oclass == COIN_CLASS) {
         if (Blind)
             You("feel the embossed words:");
-        else if (Verbose(3, doread7))
+        else if (flags.verbose)
             You("read:");
         pline("\"1 Zorkmid.  857 GUE.  In Frobs We Trust.\"");
         if (!u.uconduct.literate++)
@@ -1293,6 +1292,7 @@ seffect_confuse_monster(struct obj **sobjp)
             scursed = sobj->cursed,
             confused = (Confusion != 0),
             altfeedback = (Blind || Invisible);
+    const char *const hands = makeplural(body_part(HAND));
 
     if (gy.youmonst.data->mlet != S_HUMAN || scursed) {
         if (!HConfusion)
@@ -1300,7 +1300,7 @@ seffect_confuse_monster(struct obj **sobjp)
         make_confused(HConfusion + rnd(100), FALSE);
     } else if (confused) {
         if (!sblessed) {
-            Your("%s begin to %s%s.", makeplural(body_part(HAND)),
+            Your("%s begin to %s%s.", hands,
                  altfeedback ? "tingle" : "glow ",
                  altfeedback ? "" : hcolor(NH_PURPLE));
             make_confused(HConfusion + rnd(100), FALSE);
@@ -1315,18 +1315,20 @@ seffect_confuse_monster(struct obj **sobjp)
         int incr = (sobj->oclass == SCROLL_CLASS) ? 3 : 0;
 
         if (!sblessed) {
-            Your("%s%s %s%s.", makeplural(body_part(HAND)),
-                 altfeedback ? "" : " begin to glow",
-                 altfeedback ? (const char *) "tingle" : hcolor(NH_RED),
-                 u.umconf ? " even more" : "");
+            if (altfeedback)
+                Your("%s tingle%s.", hands, u.umconf ? " even more" : "");
+            else if (!u.umconf)
+                Your("%s begin to glow %s.", hands, hcolor(NH_RED));
+            else
+                pline_The("%s glow of your %s intensifies.", hcolor(NH_RED),
+                          hands);
             incr += rnd(2);
         } else {
             if (altfeedback)
-                Your("%s tingle %s sharply.", makeplural(body_part(HAND)),
+                Your("%s tingle %s sharply.", hands,
                      u.umconf ? "even more" : "very");
             else
-                Your("%s glow %s brilliant %s.",
-                     makeplural(body_part(HAND)),
+                Your("%s glow %s brilliant %s.", hands,
                      u.umconf ? "an even more" : "a", hcolor(NH_RED));
             incr += rn1(8, 2);
         }
@@ -1650,12 +1652,14 @@ seffect_light(struct obj **sobjp)
             for (i = 0; i < numlights; ++i) {
                 mon = makemon(&mons[pm], u.ux, u.uy,
                               MM_EDOG | NO_MINVENT | MM_NOMSG);
-                initedog(mon);
-                mon->msleeping = 0;
-                mon->mcan = TRUE;
-                if (canspotmon(mon))
-                    sawlights = TRUE;
-                newsym(mon->mx, mon->my);
+                if (mon) {
+                    initedog(mon);
+                    mon->msleeping = 0;
+                    mon->mcan = TRUE;
+                    if (canspotmon(mon))
+                        sawlights = TRUE;
+                    newsym(mon->mx, mon->my);
+                }
             }
             if (sawlights) {
                 pline("Lights appear all around you!");
@@ -2195,7 +2199,7 @@ drop_boulder_on_player(
                 pline("Fortunately, you are wearing a hard helmet.");
                 if (dmg > 2)
                     dmg = 2;
-            } else if (Verbose(3, drop_boulder_on_player)) {
+            } else if (flags.verbose) {
                 pline("%s does not protect you.", Yname2(uarmh));
             }
         }
@@ -2779,7 +2783,7 @@ do_genocide(
                      * circumstances.  Who's speaking?  Divine pronouncements
                      * aren't supposed to be hampered by deafness....
                      */
-                    if (Verbose(3, do_genocide))
+                    if (flags.verbose)
                         pline("A thunderous voice booms through the caverns:");
                     SetVoice((struct monst *) 0, 0, 80, voice_deity);
                     verbalize("No, mortal!  That will not be done.");
@@ -3161,6 +3165,9 @@ create_particular_creation(
             /* whichpm = rndmonst(); */
             /* mmflags |= (d->fem == FEMALE) ? MM_FEMALE : MM_MALE; */
         }
+        if (d->invisible)
+            mmflags |= MM_MINVIS;
+
         mtmp = makemon(whichpm, u.ux, u.uy, mmflags);
         if (!mtmp) {
             /* quit trying if creation failed and is going to repeat */
@@ -3182,24 +3189,17 @@ create_particular_creation(
 
             put_saddle_on_mon(otmp, mtmp);
         }
-        if (d->invisible) {
-            mon_set_minvis(mtmp);
-            if (does_block(mx, my, &levl[mx][my]))
-                block_point(mx, my);
-            else
-                unblock_point(mx, my);
-        }
-       if (d->hidden
+        if (d->hidden
            && ((is_hider(mtmp->data) && mtmp->data->mlet != S_MIMIC)
                || (hides_under(mtmp->data) && OBJ_AT(mx, my))
                || (mtmp->data->mlet == S_EEL && is_pool(mx, my))))
             mtmp->mundetected = 1;
         if (d->sleeping)
             mtmp->msleeping = 1;
-        /* iff asking for 'hidden', show location of every created monster
+        /* if asking for 'hidden', show location of every created monster
            that can't be seen--whether that's due to successfully hiding
            or vision issues (line-of-sight, invisibility, blindness) */
-        if (d->hidden && !canspotmon(mtmp)) {
+        if ((d->hidden || d->invisible) && !canspotmon(mtmp)) {
             int count = couldsee(mx, my) ? 8 : 4;
             char saveviz = gv.viz_array[my][mx];
 

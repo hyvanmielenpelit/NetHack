@@ -1,4 +1,4 @@
-/* NetHack 3.7	hack.c	$NHDT-Date: 1695932717 2023/09/28 20:25:17 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.410 $ */
+/* NetHack 3.7	hack.c	$NHDT-Date: 1702017600 2023/12/08 06:40:00 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.422 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Derek S. Ray, 2015. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -12,7 +12,6 @@ static int moverock(void);
 static void dosinkfall(void);
 static boolean findtravelpath(int);
 static boolean trapmove(coordxy, coordxy, struct trap *);
-static void check_buried_zombies(coordxy, coordxy);
 static schar u_simple_floortyp(coordxy, coordxy);
 static boolean swim_move_danger(coordxy, coordxy);
 static boolean domove_bump_mon(struct monst *, int);
@@ -278,7 +277,7 @@ moverock(void)
                         deliver_part1 = TRUE;
                     map_invisible(rx, ry);
                 }
-                if (Verbose(1, moverock)) {
+                if (flags.verbose) {
                     char you_or_steed[BUFSZ];
 
                     Strcpy(you_or_steed,
@@ -291,6 +290,15 @@ moverock(void)
                 }
                 goto cannot_push;
             }
+
+            if (closed_door(rx, ry))
+                goto nopushmsg;
+
+            /* at this point the boulder should be able to move (though
+               potentially into something like a trap, pool, or lava) */
+
+            /* rumbling disturbs buried zombies */
+            disturb_buried_zombies(sx, sy);
 
             if (ttmp) {
                 int newlev = 0; /* lint suppression */
@@ -402,8 +410,6 @@ moverock(void)
                 }
             }
 
-            if (closed_door(rx, ry))
-                goto nopushmsg;
             if (boulder_hits_pool(otmp, rx, ry, TRUE))
                 continue;
 
@@ -493,7 +499,8 @@ moverock(void)
                                     pick up a boulder if you have a free
                                     slot or into the overflow ('#') slot
                                     unless already carrying at least one */
-                              && (inv_cnt(FALSE) < 52 || !carrying(BOULDER))),
+                              && (inv_cnt(FALSE) < invlet_basic
+                                     || !carrying(BOULDER))),
                     willpickup = (canpickup
                                   && (flags.pickup && !gc.context.nopick)
                                   && autopick_testobj(otmp, TRUE));
@@ -610,7 +617,7 @@ still_chewing(coordxy x, coordxy y)
         watch_dig((struct monst *) 0, x, y, FALSE);
         return 1;
     } else if ((gc.context.digging.effort += (30 + u.udaminc)) <= 100) {
-        if (Verbose(1, still_chewing))
+        if (flags.verbose)
             You("%s chewing on the %s.",
                 gc.context.digging.chew ? "continue" : "begin",
                 boulder
@@ -1453,7 +1460,7 @@ trapmove(
 
     switch (u.utraptype) {
     case TT_BEARTRAP:
-        if (Verbose(1, trapmove1)) {
+        if (flags.verbose) {
             predicament = "caught in a bear trap";
             if (u.usteed)
                 Norep("%s is %s.", upstart(steedname), predicament);
@@ -1481,7 +1488,7 @@ trapmove(
             break;
         }
         if (--u.utrap) {
-            if (Verbose(1, trapmove2)) {
+            if (flags.verbose) {
                 predicament = "stuck to the web";
                 if (u.usteed)
                     Norep("%s is %s.", upstart(steedname), predicament);
@@ -1496,7 +1503,7 @@ trapmove(
         }
         break;
     case TT_LAVA:
-        if (Verbose(1, trapmove3)) {
+        if (flags.verbose) {
             predicament = "stuck in the lava";
             if (u.usteed)
                 Norep("%s is %s.", upstart(steedname), predicament);
@@ -1532,13 +1539,13 @@ trapmove(
                    our next attempt to move out of tether range
                    after this successful move would have its
                    can't-do-that message suppressed by Norep */
-                if (Verbose(1, trapmove4))
+                if (flags.verbose)
                     Norep("You move within the chain's reach.");
                 return TRUE;
             }
         }
         if (--u.utrap) {
-            if (Verbose(1, trapmove5)) {
+            if (flags.verbose) {
                 if (anchored) {
                     predicament = "chained to the";
                     culprit = "buried ball";
@@ -1593,9 +1600,20 @@ u_rooted(void)
     return FALSE;
 }
 
+/* maybe disturb buried zombies when an object is dropped or thrown nearby */
+void
+impact_disturbs_zombies(struct obj *obj, boolean violent)
+{
+    /* if object won't make a noticeable impact, let buried zombies rest */
+    if (obj->owt < (violent ? 10U : 100U) || is_flimsy(obj))
+        return;
+
+    disturb_buried_zombies(obj->ox, obj->oy);
+}
+
 /* reduce zombification timeout of buried zombies around px, py */
-static void
-check_buried_zombies(coordxy x, coordxy y)
+void
+disturb_buried_zombies(coordxy x, coordxy y)
 {
     struct obj *otmp;
     long t;
@@ -1792,7 +1810,7 @@ domove_fight_ironbars(coordxy x, coordxy y)
             if (obj->quan > 1L)
                 obj = splitobj(obj, 1L);
             else
-                setuwep((struct obj *)0);
+                setuwep((struct obj *) 0);
             freeinv(obj);
             breakflags |= BRK_KNOWN2BREAK;
         } else {
@@ -2124,12 +2142,13 @@ static void
 slippery_ice_fumbling(void)
 {
     boolean on_ice = !Levitation && is_ice(u.ux, u.uy);
+    struct monst *iceskater = u.usteed ? u.usteed : &gy.youmonst;
 
     if (on_ice) {
         if ((uarmf && objdescr_is(uarmf, "snow boots"))
-            || resists_cold(&gy.youmonst) || Flying
-            || is_floater(gy.youmonst.data) || is_clinger(gy.youmonst.data)
-            || is_whirly(gy.youmonst.data)) {
+            || resists_cold(iceskater) || Flying
+            || is_floater(iceskater->data) || is_clinger(iceskater->data)
+            || is_whirly(iceskater->data)) {
             on_ice = FALSE;
         } else if (!rn2(Cold_resistance ? 3 : 2)) {
             HFumbling |= FROMOUTSIDE;
@@ -2601,8 +2620,10 @@ domove_core(void)
                 nomul(0);
     }
 
-    if (!Levitation && !Flying && !Stealth)
-        check_buried_zombies(u.ux, u.uy);
+    /* your tread on the ground may disturb the slumber of nearby zombies */
+    if (!Levitation && !Flying && !Stealth
+        && gy.youmonst.data->cwt >= (WT_ELF / 2))
+        disturb_buried_zombies(u.ux, u.uy);
 
     if (hides_under(gy.youmonst.data) || gy.youmonst.data->mlet == S_EEL
         || u.dx || u.dy)
@@ -2805,12 +2826,11 @@ pooleffects(
         if (!is_pool(u.ux, u.uy)) {
             if (Is_waterlevel(&u.uz)) {
                 You("pop into an air bubble.");
+                iflags.last_msg = PLNMSG_BACK_ON_GROUND;
             } else if (is_lava(u.ux, u.uy)) {
                 You("leave the %s...", hliquid("water")); /* oops! */
             } else {
-                You("are on solid %s again.",
-                    is_ice(u.ux, u.uy) ? "ice" : "land");
-                iflags.last_msg = PLNMSG_BACK_ON_GROUND;
+                back_on_ground(FALSE);
             }
         } else if (Is_waterlevel(&u.uz)) {
             still_inwater = TRUE;
@@ -3745,6 +3765,7 @@ unmul(const char *msg_override)
     gn.nomovemsg = 0;
     u.usleep = 0;
     gm.multi_reason = NULL, gm.multireasonbuf[0] = '\0';
+
     if (ga.afternmv) {
         int (*f)(void) = ga.afternmv;
 
@@ -3752,8 +3773,6 @@ unmul(const char *msg_override)
            encumbrance hack for levitation--see weight_cap()) */
         ga.afternmv = (int (*)(void)) 0;
         (void) (*f)();
-        /* for finishing Armor/Boots/&c_on() */
-        update_inventory();
     }
 }
 
@@ -3801,6 +3820,11 @@ saving_grace(int dmg)
         && (u.uhp * 100 / u.uhpmax) > 90) {
         dmg = u.uhp - 1;
         u.usaving_grace = TRUE; /* used up */
+        end_running(TRUE);
+        if (u.usleep)
+            unmul("Suddenly you wake up!");
+        if (is_fainted())
+            reset_faint();
     }
     return dmg;
 }

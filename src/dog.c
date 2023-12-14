@@ -1,4 +1,4 @@
-/* NetHack 3.7	dog.c	$NHDT-Date: 1693427872 2023/08/30 20:37:52 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.146 $ */
+/* NetHack 3.7	dog.c	$NHDT-Date: 1700012881 2023/11/15 01:48:01 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.147 $ */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Robert Patrick Rankin, 2011. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -188,12 +188,10 @@ makedog(void)
         return ((struct monst *) 0);
 
     pettype = pet_type();
-    if (pettype == PM_LITTLE_DOG)
-        petname = gd.dogname;
-    else if (pettype == PM_PONY)
-        petname = gh.horsename;
-    else
-        petname = gc.catname;
+    petname = (pettype == PM_LITTLE_DOG) ? gd.dogname
+              : (pettype == PM_KITTEN) ? gc.catname
+                : (pettype == PM_PONY) ? gh.horsename
+                  : "";
 
     /* default pet names */
     if (!*petname && pettype == PM_LITTLE_DOG) {
@@ -606,10 +604,12 @@ mon_catchup_elapsed_time(
         mtmp->mstun = 0;
 
     /* might finish eating or be able to use special ability again */
-    if (imv > mtmp->meating)
-        finish_meating(mtmp);
-    else
-        mtmp->meating -= imv;
+    if (mtmp->meating) {
+        if (imv > mtmp->meating)
+            finish_meating(mtmp);
+        else
+            mtmp->meating -= imv;
+    }
     if (imv > mtmp->mspec_used)
         mtmp->mspec_used = 0;
     else
@@ -735,7 +735,7 @@ keepdogs(
                unlike level change for steed, don't bother trying
                to achieve a normal trap escape first */
             mtmp->mtrapped = 0;
-            mtmp->meating = 0;
+            finish_meating(mtmp);
             mtmp->msleeping = 0;
             mtmp->mfrozen = 0;
             mtmp->mcanmove = 1;

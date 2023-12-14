@@ -285,7 +285,7 @@ nh_basename(const char *fname, boolean keep_suffix)
  *
  *   Sample:
  *      The following call:
- *  (void)fname_encode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+ * (void) fname_encode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
  *                     '%', "This is a % test!", buf, 512);
  *      results in this encoding:
  *          "This%20is%20a%20%25%20test%21"
@@ -504,9 +504,9 @@ zero_nhfile(NHFILE *nhfp)
         nhfp->fieldlevel = FALSE;
         nhfp->addinfo = FALSE;
         nhfp->bendian = IS_BIGENDIAN();
-        nhfp->fpdef = (FILE *)0;
-        nhfp->fplog = (FILE *)0;
-        nhfp->fpdebug = (FILE *)0;
+        nhfp->fpdef = (FILE *) 0;
+        nhfp->fplog = (FILE *) 0;
+        nhfp->fpdebug = (FILE *) 0;
         nhfp->count = 0;
         nhfp->eof = FALSE;
         nhfp->fnidx = 0;
@@ -516,7 +516,7 @@ zero_nhfile(NHFILE *nhfp)
 static NHFILE *
 new_nhfile(void)
 {
-    NHFILE *nhfp = (NHFILE *)alloc(sizeof(NHFILE));
+    NHFILE *nhfp = (NHFILE *) alloc(sizeof(NHFILE));
 
     zero_nhfile(nhfp);
     return nhfp;
@@ -1202,7 +1202,7 @@ restore_saved_game(void)
     if ((nhfp = open_savefile()) != 0) {
         if (validate(nhfp, fq_save, FALSE) != 0) {
             close_nhfile(nhfp);
-            nhfp = (NHFILE *)0;
+            nhfp = (NHFILE *) 0;
             (void) delete_savefile();
         }
     }
@@ -1647,11 +1647,7 @@ docompress_file(const char *filename, boolean uncomp)
 void
 nh_compress(const char *filename UNUSED_if_not_COMPRESS)
 {
-#if !defined(COMPRESS) && !defined(ZLIB_COMP)
-#ifdef PRAGMA_UNUSED
-#pragma unused(filename)
-#endif
-#else
+#if defined(COMPRESS) || defined(ZLIB_COMP)
     docompress_file(filename, FALSE);
 #endif
 }
@@ -1660,11 +1656,7 @@ nh_compress(const char *filename UNUSED_if_not_COMPRESS)
 void
 nh_uncompress(const char *filename UNUSED_if_not_COMPRESS)
 {
-#if !defined(COMPRESS) && !defined(ZLIB_COMP)
-#ifdef PRAGMA_UNUSED
-#pragma unused(filename)
-#endif
-#else
+#if defined(COMPRESS) || defined(ZLIB_COMP)
     docompress_file(filename, TRUE);
 #endif
 }
@@ -1825,6 +1817,8 @@ docompress_file(const char *filename, boolean uncomp)
 }
 #endif /* RLC 09 Mar 1999: End ZLIB patch */
 
+#undef UNUSED_if_not_COMPRESS
+
 /* ----------  END FILE COMPRESSION HANDLING ----------- */
 
 /* ----------  BEGIN FILE LOCKING HANDLING ----------- */
@@ -1842,9 +1836,18 @@ struct flock sflock; /* for unlocking, same as above */
 #define HUP
 #endif
 
+
+#if defined(UNIX) || defined(VMS) || defined(AMIGA) || defined(WIN32) \
+    || defined(MSDOS)
+#define UNUSED_conditional /*empty*/
+#else
+#define UNUSED_conditional UNUSED
+#endif
+
+
 #ifndef USE_FCNTL
 static char *
-make_lockname(const char *filename, char *lockname)
+make_lockname(const char *filename UNUSED_conditional, char *lockname)
 {
 #if defined(UNIX) || defined(VMS) || defined(AMIGA) || defined(WIN32) \
     || defined(MSDOS)
@@ -1867,9 +1870,6 @@ make_lockname(const char *filename, char *lockname)
 #endif
     return lockname;
 #else /* !(UNIX || VMS || AMIGA || WIN32 || MSDOS) */
-#ifdef PRAGMA_UNUSED
-#pragma unused(filename)
-#endif
     lockname[0] = '\0';
     return (char *) 0;
 #endif
@@ -1878,12 +1878,9 @@ make_lockname(const char *filename, char *lockname)
 
 /* lock a file */
 boolean
-lock_file(const char *filename, int whichprefix, int retryct)
+lock_file(const char *filename, int whichprefix,
+	  int retryct UNUSED_conditional)
 {
-#if defined(PRAGMA_UNUSED) && !(defined(UNIX) || defined(VMS)) \
-    && !(defined(AMIGA) || defined(WIN32) || defined(MSDOS))
-#pragma unused(retryct)
-#endif
 #ifndef USE_FCNTL
     char locknambuf[BUFSZ];
     const char *lockname;
@@ -2081,6 +2078,8 @@ unlock_file(const char *filename)
 
     gn.nesting--;
 }
+
+#undef UNUSED_conditional
 
 /* ----------  END FILE LOCKING HANDLING ----------- */
 
@@ -3880,7 +3879,7 @@ fopen_wizkit_file(void)
 static void
 wizkit_addinv(struct obj *obj)
 {
-    if (!obj || obj == &cg.zeroobj)
+    if (!obj || obj == &hands_obj)
         return;
 
     /* subset of starting inventory pre-ID */
@@ -3888,7 +3887,7 @@ wizkit_addinv(struct obj *obj)
     if (Role_if(PM_CLERIC))
         obj->bknown = 1; /* ok to bypass set_bknown() */
     /* same criteria as lift_object()'s check for available inventory slot */
-    if (obj->oclass != COIN_CLASS && inv_cnt(FALSE) >= 52
+    if (obj->oclass != COIN_CLASS && inv_cnt(FALSE) >= invlet_basic
         && !merge_choice(gi.invent, obj)) {
         /* inventory overflow; can't just place & stack object since
            hero isn't in position yet, so schedule for arrival later */
@@ -3912,7 +3911,7 @@ proc_wizkit_line(char *buf)
     otmp = readobjnam(buf, (struct obj *) 0);
 
     if (otmp) {
-        if (otmp != &cg.zeroobj)
+        if (otmp != &hands_obj)
             wizkit_addinv(otmp);
     } else {
         /* .60 limits output line width to 79 chars */
@@ -4031,9 +4030,6 @@ read_sym_file(int which_set)
 void
 check_recordfile(const char *dir UNUSED_if_not_OS2_CODEVIEW)
 {
-#if defined(PRAGMA_UNUSED) && !defined(OS2_CODEVIEW)
-#pragma unused(dir)
-#endif
     const char *fq_record;
     int fd;
 
@@ -4135,6 +4131,8 @@ check_recordfile(const char *dir UNUSED_if_not_OS2_CODEVIEW)
 
 #endif /* MICRO || WIN32*/
 }
+
+#undef UNUSED_if_not_OS2_CODEVIEW
 
 /* ----------  END SCOREBOARD CREATION ----------- */
 

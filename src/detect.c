@@ -21,7 +21,7 @@ static boolean check_map_spot(coordxy, coordxy, char, unsigned);
 static boolean clear_stale_map(char, unsigned);
 static void sense_trap(struct trap *, coordxy, coordxy, int);
 static int detect_obj_traps(struct obj *, boolean, int);
-static void display_trap_map(struct trap *, int);
+static void display_trap_map(int);
 static int furniture_detect(void);
 static void findone(coordxy, coordxy, genericptr_t);
 static void openone(coordxy, coordxy, genericptr_t);
@@ -106,7 +106,7 @@ browse_map(unsigned ter_typ, const char *ter_explain)
 static void
 map_monst(struct monst *mtmp, boolean showtail)
 {
-    int glyph = (def_monsyms[(int) mtmp->data->mlet].sym == ' ')
+    int glyph = (monsym(mtmp->data) == ' ')
                 ? detected_mon_to_glyph(mtmp, newsym_rn2)
                 : mtmp->mtame
                   ? pet_to_glyph(mtmp, newsym_rn2)
@@ -920,9 +920,10 @@ detect_obj_traps(
 }
 
 static void
-display_trap_map(struct trap *ttmp, int cursed_src)
+display_trap_map(int cursed_src)
 {
     struct monst *mon;
+    struct trap *ttmp;
     int door, glyph, ter_typ = TER_DETECT | ( cursed_src ? TER_OBJ : TER_TRP );
     coord cc;
 
@@ -989,7 +990,7 @@ trap_detect(struct obj *sobj) /* null if crystal ball,
     /* floor/ceiling traps */
     for (ttmp = gf.ftrap; ttmp; ttmp = ttmp->ntrap) {
         if (ttmp->tx != u.ux || ttmp->ty != u.uy) {
-            display_trap_map(ttmp, cursed_src);
+            display_trap_map(cursed_src);
             return 0;
         } else
             found = TRUE;
@@ -997,7 +998,7 @@ trap_detect(struct obj *sobj) /* null if crystal ball,
     /* chest traps (might be buried or carried) */
     if ((tr = detect_obj_traps(fobj, FALSE, 0)) != OTRAP_NONE) {
         if (tr & OTRAP_THERE) {
-            display_trap_map(ttmp, cursed_src);
+            display_trap_map(cursed_src);
             return 0;
         } else
             found = TRUE;
@@ -1005,7 +1006,7 @@ trap_detect(struct obj *sobj) /* null if crystal ball,
     if ((tr = detect_obj_traps(gl.level.buriedobjlist, FALSE, 0))
         != OTRAP_NONE) {
         if (tr & OTRAP_THERE) {
-            display_trap_map(ttmp, cursed_src);
+            display_trap_map(cursed_src);
             return 0;
         } else
             found = TRUE;
@@ -1015,7 +1016,7 @@ trap_detect(struct obj *sobj) /* null if crystal ball,
             continue;
         if ((tr = detect_obj_traps(mon->minvent, FALSE, 0)) != OTRAP_NONE) {
             if (tr & OTRAP_THERE) {
-                display_trap_map(ttmp, cursed_src);
+                display_trap_map(cursed_src);
                 return 0;
             } else
                 found = TRUE;
@@ -1033,7 +1034,7 @@ trap_detect(struct obj *sobj) /* null if crystal ball,
             continue;
         if (levl[cc.x][cc.y].doormask & D_TRAPPED) {
             if (cc.x != u.ux || cc.y != u.uy) {
-                display_trap_map(ttmp, cursed_src);
+                display_trap_map(cursed_src);
                 return 0;
             } else
                 found = TRUE;
@@ -1250,12 +1251,12 @@ use_crystal_ball(struct obj **optr)
     }
 
     /* read a single character */
-    if (Verbose(0, use_crystal_ball1))
+    if (flags.verbose)
         You("may look for an object, monster, or special map symbol.");
     ch = yn_function("What do you look for?", (char *) 0, '\0', TRUE);
     /* Don't filter out ' ' here; it has a use */
     if ((ch != def_monsyms[S_GHOST].sym) && strchr(quitchars, ch)) {
-        if (Verbose(0, use_crystal_ball2))
+        if (flags.verbose)
             pline1(Never_mind);
         return;
     }
@@ -1973,9 +1974,9 @@ warnreveal(void)
         }
 }
 
-/* Pre-map the sokoban levels */
+/* Pre-map (the sokoban) levels */
 void
-sokoban_detect(void)
+premap_detect(void)
 {
     register coordxy x, y;
     register struct trap *ttmp;
@@ -1997,9 +1998,6 @@ sokoban_detect(void)
     for (ttmp = gf.ftrap; ttmp; ttmp = ttmp->ntrap) {
         ttmp->tseen = 1;
         map_trap(ttmp, 1);
-        /* set sokoban_rules when there is at least one pit or hole */
-        if (ttmp->ttyp == PIT || ttmp->ttyp == HOLE)
-            Sokoban = 1;
     }
 }
 

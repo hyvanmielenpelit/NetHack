@@ -19,7 +19,6 @@ static void do_reset_eat(void);
 static void maybe_extend_timed_resist(int);
 static void done_eating(boolean);
 static void cprefx(int);
-static int intrinsic_possible(int, struct permonst *);
 static boolean temp_givit(int, struct permonst *);
 static void givit(int, struct permonst *);
 static void eye_of_newt_buzz(void);
@@ -362,7 +361,7 @@ touchfood(struct obj *otmp)
 
     if (carried(otmp)) {
         freeinv(otmp);
-        if (inv_cnt(FALSE) >= 52) {
+        if (inv_cnt(FALSE) >= invlet_basic) {
             sellobj_state(SELL_DONTSELL);
             dropy(otmp);
             sellobj_state(SELL_NORMAL);
@@ -847,7 +846,7 @@ fix_petrification(void)
  */
 
 /* intrinsic_possible() returns TRUE iff a monster can give an intrinsic. */
-static int
+int
 intrinsic_possible(int type, struct permonst *ptr)
 {
     int res = 0;
@@ -1502,7 +1501,7 @@ consume_tin(const char *mesg)
 
         pline("It smells like %s.", what);
         if (y_n("Eat it?") == 'n') {
-            if (Verbose(0, consume_tin1))
+            if (flags.verbose)
                 You("discard the open tin.");
             if (!Hallucination)
                 tin->dknown = tin->known = 1;
@@ -1555,7 +1554,7 @@ consume_tin(const char *mesg)
         }
 
         if (y_n("Eat it?") == 'n') {
-            if (Verbose(0, consume_tin2))
+            if (flags.verbose)
                 You("discard the open tin.");
             tin = costly_tin(COST_OPEN);
             goto use_up_tin;
@@ -2720,8 +2719,8 @@ doeat(void)
         }
     }
 
-    /* from floorfood(), &zeroobj means iron bars at current spot */
-    if (otmp == &cg.zeroobj) {
+    /* from floorfood(), &hands_obj means iron bars at current spot */
+    if (otmp == &hands_obj) {
         /* hero in metallivore form is eating [diggable] iron bars
            at current location so skip the other assorted checks;
            operates as if digging rather than via the eat occupation */
@@ -3508,7 +3507,7 @@ floorfood(
                 c = yn_function(qbuf, ynqchars, 'n', TRUE);
             }
             if (c == 'y')
-                return (struct obj *) &cg.zeroobj; /* csst away 'const' */
+                return &hands_obj;
             else if (c == 'q')
                 return (struct obj *) 0;
             ++getobj_else;

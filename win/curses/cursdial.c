@@ -34,6 +34,7 @@ typedef struct nhmi {
     char accelerator;           /* Character used to select item from menu */
     char group_accel;           /* Group accelerator for menu item, if any */
     int attr;                   /* Text attributes for item */
+    int color;                  /* Color for item */
     const char *str;            /* Text of menu item */
     boolean presel;             /* Whether menu item should be preselected */
     boolean selected;           /* Whether item is currently selected */
@@ -585,7 +586,8 @@ curs_new_menu_item(winid wid, const char *str)
     new_item->identifier = cg.zeroany;
     new_item->accelerator = '\0';
     new_item->group_accel = '\0';
-    new_item->attr = 0;
+    new_item->attr = ATR_NONE;
+    new_item->color = NO_COLOR;
     new_item->str = new_str;
     new_item->presel = FALSE;
     new_item->selected = FALSE;
@@ -607,6 +609,7 @@ curses_add_nhmenu_item(
     char accelerator,
     char group_accel,
     int attr,
+    int clr,
     const char *str,
     unsigned itemflags)
 {
@@ -630,6 +633,7 @@ curses_add_nhmenu_item(
     new_item->accelerator = accelerator;
     new_item->group_accel = group_accel;
     new_item->attr = attr;
+    new_item->color = clr;
     new_item->presel = presel;
     new_item->itemflags = itemflags;
     current_items = current_menu->entries;
@@ -1160,6 +1164,8 @@ get_menuitem_y(
 
 /* Displays menu selections in the given window */
 
+extern color_attr curses_menu_promptstyle; /*cursmain.c */
+
 static void
 menu_display_page(
     nhmenu *menu, WINDOW *win,
@@ -1171,8 +1177,7 @@ menu_display_page(
     int count, curletter, entry_cols, start_col, num_lines;
     char *tmpstr;
     boolean first_accel = TRUE;
-    int color = NO_COLOR, attr = A_NORMAL;
-    boolean menu_color = FALSE;
+    int color = NO_COLOR, attr;
 
     /* letters assigned to entries on current page */
     if (selectors)
@@ -1204,7 +1209,11 @@ menu_display_page(
 
         for (count = 0; count < num_lines; count++) {
             tmpstr = curses_break_str(menu->prompt, menu->width, count + 1);
+            curses_menu_color_attr(win, curses_menu_promptstyle.color,
+			             curses_menu_promptstyle.attr, ON);
             mvwprintw(win, count + 1, 1, "%s", tmpstr);
+            curses_menu_color_attr(win, curses_menu_promptstyle.color,
+			             curses_menu_promptstyle.attr, OFF);
             free(tmpstr);
         }
     }
@@ -1275,18 +1284,13 @@ menu_display_page(
             start_col += 2;
         }
 #endif
-        color = NONE;
-        menu_color = iflags.use_menu_color
-                     && get_menu_coloring(menu_item_ptr->str, &color, &attr);
-        if (menu_color) {
-            attr = curses_convert_attr(attr);
-            if (color != NONE || attr != A_NORMAL)
-                curses_menu_color_attr(win, color, attr, ON);
-        } else {
-            attr = menu_item_ptr->attr;
-            if (color != NONE || attr != A_NORMAL)
-                curses_toggle_color_attr(win, color, attr, ON);
-        }
+	color = menu_item_ptr->color;
+        if (color == NO_COLOR)
+            color = NONE;
+	attr = menu_item_ptr->attr;
+	/* attr is already a curses attr (A_ not ATR_) */
+	if (color != NONE || attr != A_NORMAL)
+            curses_menu_color_attr(win, color, attr, ON);
 
         num_lines = curses_num_lines(menu_item_ptr->str, entry_cols);
         for (count = 0; count < num_lines; count++) {
@@ -1299,12 +1303,8 @@ menu_display_page(
             }
         }
         if (color != NONE || attr != A_NORMAL) {
-            if (menu_color)
-                curses_menu_color_attr(win, color, attr, OFF);
-            else
-                curses_toggle_color_attr(win, color, attr, OFF);
+            curses_menu_color_attr(win, color, attr, OFF);
         }
-
         menu_item_ptr = menu_item_ptr->next_item;
     }
 
@@ -1538,7 +1538,8 @@ menu_get_selections(WINDOW *win, nhmenu *menu, int how)
             }
             /*FALLTHRU*/
         default:
-            if (isdigit(curletter) && !groupaccels[curletter]) {
+            if (isdigit(curletter) && !selectors[curletter]
+                && !groupaccels[curletter]) {
                 count = curses_get_count(curletter);
                 /* after count, we know some non-digit is already pending */
                 curletter = curses_getch();

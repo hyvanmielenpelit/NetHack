@@ -1910,7 +1910,7 @@ static const int treefruits[] = {
 struct obj *
 rnd_treefruit_at(coordxy x, coordxy y)
 {
-    return mksobj_at(treefruits[rn2(SIZE(treefruits))], x, y, TRUE, FALSE);
+    return mksobj_at(ROLL_FROM(treefruits), x, y, TRUE, FALSE);
 }
 
 /* create a stack of N gold pieces; never returns Null */
@@ -2047,13 +2047,12 @@ save_mtraits(struct obj *obj, struct monst *mtmp)
     if (!has_omonst(obj))
         newomonst(obj);
     if (has_omonst(obj)) {
-        int baselevel = mtmp->data->mlevel;
+        int baselevel = mtmp->data->mlevel; /* mtmp->data is valid ptr */
         struct monst *mtmp2 = OMONST(obj);
 
         *mtmp2 = *mtmp;
         mtmp2->mextra = (struct mextra *) 0;
-        if (mtmp->data)
-            mtmp2->mnum = monsndx(mtmp->data);
+        mtmp2->mnum = monsndx(mtmp->data);
         /* invalidate pointers */
         /* m_id is needed to know if this is a revived quest leader */
         /* but m_id must be cleared when loading bones */
@@ -2631,6 +2630,10 @@ dealloc_obj(struct obj *obj)
         panic("dealloc_obj with nobj");
     if (obj->cobj)
         panic("dealloc_obj with cobj");
+    if (obj == &hands_obj) {
+        impossible("dealloc_obj with hands_obj");
+        return;
+    }
 
     /* free up any timers attached to the object */
     if (obj->timed)
@@ -2860,6 +2863,11 @@ objlist_sanity(struct obj *objlist, int wheretype, const char *mesg)
     for (obj = objlist; obj; obj = obj->nobj) {
         if (obj->where != wheretype)
             insane_object(obj, ofmt0, mesg, (struct monst *) 0);
+        if (obj->where == OBJ_INVENT && obj->how_lost != LOST_NONE) {
+            char lostbuf[40];
+            Sprintf(lostbuf, "how_lost=%d obj in inventory!", obj->how_lost);
+            insane_object(obj, ofmt0, lostbuf, (struct monst *) 0);
+        }
         if (Has_contents(obj)) {
             if (wheretype == OBJ_ONBILL)
                 /* containers on shop bill should always be empty */
